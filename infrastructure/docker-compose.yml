@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # ============================================================
+  # 1. PostgreSQL 16 - Base de Datos Relacional Multi-Tenant
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: smartrestaurant-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: smartrestaurant_db
+      POSTGRES_USER: sr_admin
+      POSTGRES_PASSWORD: sr_secure_password_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sr_admin -d smartrestaurant_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sr-network
+
+  # ============================================================
+  # 2. RabbitMQ 3.13 - Bus de Mensajería Asíncrona con Management
+  # ============================================================
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: smartrestaurant-rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: sr_rabbit
+      RABBITMQ_DEFAULT_PASS: sr_rabbit_pass_2026
+    ports:
+      - "5672:5672"    # Protocolo AMQP 0-9-1
+      - "15672:15672"  # Interfaz Web de Gestión (Management UI)
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks:
+      - sr-network
+
+  # ============================================================
+  # 3. SmartRestaurant API Gateway & Frontend SPA
+  # ============================================================
+  app:
+    build:
+      context: ..
+      dockerfile: infrastructure/Dockerfile.app
+    container_name: smartrestaurant-gateway-app
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://sr_admin:sr_secure_password_2026@postgres:5432/smartrestaurant_db
+      RABBITMQ_URL: amqp://sr_rabbit:sr_rabbit_pass_2026@rabbitmq:5672
+      JWT_SECRET: sr_super_secret_jwt_key_dist_2026
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - sr-network
+
+volumes:
+  postgres_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+
+networks:
+  sr-network:
+    driver: bridge

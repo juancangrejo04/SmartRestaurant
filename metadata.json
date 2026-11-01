@@ -1,0 +1,6 @@
+{
+  "name": "SmartRestaurant",
+  "description": "Plataforma Distribuida Multinacional para la Gestión Inteligente de Reservas y Pedidos en Restaurantes",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

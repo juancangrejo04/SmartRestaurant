@@ -1,0 +1,888 @@
+# PROMPT MAESTRO — SMARTRESTAURANT
+
+## 1. ROL Y OBJETIVO PRINCIPAL
+
+Actúa como un equipo sénior de desarrollo de software compuesto por un arquitecto de sistemas distribuidos, desarrolladores full-stack, especialista en bases de datos, experto en ciberseguridad, diseñador UX/UI y especialista en internacionalización.
+
+Debes diseñar, desarrollar, probar y documentar una aplicación web completa, funcional, moderna y adaptable a dispositivos móviles llamada **SmartRestaurant**.
+
+No quiero solamente una propuesta, un prototipo visual, una landing page, un conjunto de pantallas estáticas ni una guía de instrucciones. Quiero que generes el código real de la aplicación, implementes sus funcionalidades, conectes el frontend con el backend y prepares la infraestructura necesaria para ejecutar el sistema.
+
+### Nombre del proyecto
+
+SmartRestaurant.
+
+### Nombre académico
+
+Plataforma Distribuida Multinacional para la Gestión Inteligente de Reservas y Pedidos en Restaurantes.
+
+### Propósito del negocio
+
+SmartRestaurant es una plataforma SaaS multinacional que conecta a clientes que necesitan reservar mesas y solicitar alimentos con restaurantes que ofrecen estos servicios.
+
+La plataforma debe coordinar digitalmente el proceso completo: desde la reserva y asignación de una mesa hasta el registro de pedidos, su preparación en cocina y la entrega al cliente.
+
+El sistema debe permitir que múltiples restaurantes y sus sucursales utilicen la misma plataforma, manteniendo sus usuarios, configuraciones, menús, mesas, reservas, pedidos e informes aislados y protegidos.
+
+**El requisito académico central es que SmartRestaurant sea un sistema distribuido real y que admita cinco mercados internacionales con diferentes idiomas y monedas.** Estos requisitos no son opcionales.
+
+---
+
+## 2. REGLAS DE DESARROLLO
+
+1. Construye una aplicación funcional de extremo a extremo.
+2. Implementa las operaciones reales de crear, consultar, actualizar y eliminar cuando corresponda.
+3. No sustituyas funcionalidades por botones decorativos, datos estáticos o acciones que no hacen nada.
+4. No uses arreglos en memoria, datos ficticios o localStorage como base de datos principal.
+5. Utiliza persistencia real en PostgreSQL para los datos de negocio.
+6. Implementa autenticación real, autorización por roles y aislamiento entre restaurantes.
+7. Separa los servicios del backend por dominios funcionales.
+8. Implementa comunicación entre servicios y mensajería asíncrona.
+9. Incluye instrucciones de ejecución local y pruebas reproducibles.
+10. Si Google AI Studio no puede ejecutar alguna parte de la infraestructura, genera los archivos reales necesarios para ejecutarla externamente. Explica la limitación sin fingir que el componente ya está desplegado.
+11. No afirmes que las pruebas pasan si no se han ejecutado.
+12. Prioriza una implementación funcional y coherente sobre una gran cantidad de funcionalidades incompletas.
+
+Antes de escribir código, define una arquitectura y un plan de implementación. Después, desarrolla el proyecto; no te detengas en el plan.
+
+---
+
+## 3. ARQUITECTURA DISTRIBUIDA OBLIGATORIA
+
+Implementa una arquitectura de microservicios organizados por responsabilidad, con comunicación por API REST y eventos asíncronos mediante RabbitMQ.
+
+Utiliza un monorepositorio organizado de forma clara, por ejemplo:
+
+- `frontend/`: aplicación web.
+- `services/auth-service/`: usuarios, autenticación y permisos.
+- `services/restaurant-service/`: restaurantes, sucursales, mesas y menús.
+- `services/reservation-service/`: reservas y disponibilidad.
+- `services/order-service/`: pedidos y sus productos.
+- `services/kitchen-service/`: preparación y estados de cocina.
+- `services/notification-service/`: notificaciones.
+- `services/analytics-service/`: informes y recomendaciones.
+- `infrastructure/`: configuración de Docker, RabbitMQ y herramientas operativas.
+- `docs/`: arquitectura, diagramas, contratos y manuales.
+- `tests/`: pruebas automatizadas.
+
+Puedes ajustar la estructura si existe una razón técnica justificada, pero debes conservar la separación lógica y operativa de los servicios.
+
+### Tecnologías principales
+
+**Frontend**
+- React.
+- TypeScript.
+- Vite.
+- Diseño adaptable y componentes reutilizables.
+- Biblioteca de internacionalización, como i18next.
+- Cliente HTTP con manejo centralizado de errores.
+- Actualizaciones en tiempo real mediante WebSockets o Server-Sent Events cuando corresponda.
+
+**Backend**
+- Node.js y TypeScript.
+- Express o NestJS, seleccionando una tecnología y utilizándola consistentemente.
+- API REST documentadas con OpenAPI.
+- RabbitMQ para mensajería asíncrona.
+- PostgreSQL como base de datos principal.
+- ORM compatible con PostgreSQL, como Prisma o TypeORM.
+
+**Infraestructura**
+- Docker.
+- Docker Compose.
+- RabbitMQ con interfaz de administración para desarrollo.
+- PostgreSQL.
+- Variables de entorno.
+- Migraciones y datos iniciales reproducibles.
+
+Utiliza versiones compatibles y estables de las dependencias.
+
+### Requisito fundamental
+
+Los servicios deben ser procesos independientes, ejecutables y comunicados a través de contratos de red definidos.
+
+No presentes una aplicación monolítica como si fuera un sistema distribuido. Tampoco consideres que tener varios componentes React, varias carpetas o varias tablas equivale a tener microservicios.
+
+Si necesitas una puerta de enlace API, impleméntala o documenta claramente el punto de entrada y el enrutamiento.
+
+### Responsabilidad de cada servicio
+
+**Auth Service**
+- Registro e inicio de sesión.
+- Gestión de usuarios.
+- Roles y permisos.
+- Emisión y validación de tokens.
+- Recuperación de acceso mediante un mecanismo seguro, si se configura un proveedor de correo.
+
+**Restaurant Service**
+- Creación y configuración de restaurantes.
+- Gestión de sucursales.
+- Mesas y capacidad.
+- Menús, categorías y productos.
+- Horarios de atención.
+- Configuración regional del restaurante.
+
+**Reservation Service**
+- Consulta de disponibilidad.
+- Creación, modificación y cancelación de reservas.
+- Asignación de mesas.
+- Prevención de reservas duplicadas.
+- Publicación de eventos de reserva.
+
+**Order Service**
+- Creación de pedidos.
+- Detalle de productos y cantidades.
+- Cálculo de subtotales y totales.
+- Validación de precios en el servidor.
+- Seguimiento del estado general del pedido.
+- Publicación de eventos de pedido.
+
+**Kitchen Service**
+- Recepción de pedidos confirmados.
+- Cola de trabajo de cocina.
+- Actualización de los estados de preparación.
+- Identificación de pedidos por sucursal, mesa y hora.
+- Publicación de eventos de cambios de estado.
+
+**Notification Service**
+- Notificaciones sobre reservas y pedidos.
+- Notificaciones internas visibles en la aplicación.
+- Adaptadores para correo electrónico opcionales, configurados mediante variables de entorno.
+- Reintentos y control de errores de envío.
+
+**Analytics Service**
+- Indicadores operativos.
+- Informes de reservas y pedidos.
+- Análisis de ocupación.
+- Recomendaciones basadas en reglas de negocio.
+- Identificación de tendencias a partir de datos persistidos.
+
+No es obligatorio crear un servicio independiente para cada tabla. La separación debe seguir responsabilidades de negocio reales.
+
+---
+
+## 4. COMUNICACIÓN DISTRIBUIDA Y CONSISTENCIA
+
+Implementa dos mecanismos de comunicación:
+
+### Comunicación síncrona
+
+Usa API REST para operaciones que necesitan una respuesta inmediata, por ejemplo:
+- Consultar un restaurante.
+- Consultar disponibilidad.
+- Validar un producto.
+- Crear una reserva.
+- Obtener los detalles de un pedido.
+
+Define contratos claros, códigos HTTP apropiados, validación de entradas, autenticación y manejo uniforme de errores.
+
+### Comunicación asíncrona
+
+Utiliza RabbitMQ para publicar y consumir eventos de negocio.
+
+Incluye, como mínimo, eventos equivalentes a:
+
+- `ReservationCreated`
+- `ReservationCancelled`
+- `OrderCreated`
+- `OrderConfirmed`
+- `OrderAcceptedByKitchen`
+- `OrderStatusChanged`
+- `OrderReady`
+- `OrderDelivered`
+
+Los nombres pueden adaptarse, pero debe existir un contrato de eventos documentado y una implementación funcional.
+
+Cada evento debe incluir, cuando corresponda:
+- Identificador único.
+- Tipo de evento.
+- Fecha y hora de creación.
+- Identificador del restaurante y de la sucursal.
+- Identificador de la entidad afectada.
+- Versión del esquema.
+- Identificador de correlación para rastrear la operación.
+
+Implementa colas y bindings apropiados, confirmación de mensajes, acknowledgements, reintentos controlados y una estrategia para mensajes fallidos, como una dead-letter queue.
+
+Los consumidores deben ser idempotentes para evitar procesar dos veces una operación de negocio.
+
+Para evitar perder eventos cuando una transacción de base de datos se confirma pero la publicación a RabbitMQ falla, implementa el patrón Transactional Outbox, al menos para los flujos críticos, o documenta e implementa una alternativa consistente.
+
+No dependas de una transacción SQL que abarque automáticamente todas las bases de datos de los microservicios.
+
+### Consistencia y fallos
+
+Implementa:
+- Transacciones locales por servicio.
+- Restricciones de integridad en PostgreSQL.
+- Control de concurrencia.
+- Idempotencia en operaciones críticas.
+- Timeouts en las llamadas entre servicios.
+- Reintentos limitados y apropiados.
+- Registro de errores y trazabilidad mediante correlation IDs.
+- Comportamiento definido cuando RabbitMQ o un servicio no están disponibles.
+- Compensación o recuperación cuando una operación distribuida no puede completarse.
+
+Documenta qué datos son consistentes inmediatamente y cuáles pueden tardar en actualizarse por tratarse de procesamiento asíncrono.
+
+---
+
+## 5. BASE DE DATOS Y AISLAMIENTO MULTI-TENANT
+
+Usa PostgreSQL con migraciones versionadas, relaciones, índices y restricciones de integridad.
+
+Cada restaurante debe pertenecer a un tenant identificado de forma inequívoca. Los usuarios solo pueden acceder a los restaurantes, sucursales y recursos para los que tienen permisos.
+
+Implementa un modelo de datos adecuado que incluya, según corresponda:
+
+- Tenants o restaurantes.
+- Sucursales.
+- Usuarios.
+- Roles y asignaciones de permisos.
+- Mesas.
+- Reservas.
+- Categorías del menú.
+- Productos.
+- Pedidos.
+- Detalles de pedidos.
+- Estados e historial de pedidos.
+- Notificaciones.
+- Eventos de integración.
+- Registro de recomendaciones.
+- Auditoría de operaciones relevantes.
+
+Define claramente qué servicio es propietario de cada entidad y evita que los demás servicios modifiquen directamente sus tablas.
+
+Para el MVP puedes utilizar una instancia PostgreSQL compartida con esquemas o tablas separados por servicio, siempre que los límites de propiedad estén bien definidos. Documenta esta decisión y no permitas que los servicios dependan directamente de tablas internas ajenas.
+
+Todos los datos deben sobrevivir al reinicio de los contenedores mediante volúmenes persistentes.
+
+Incluye un mecanismo reproducible para crear un entorno de demostración con datos iniciales.
+
+---
+
+## 6. RESERVAS Y CONCURRENCIA
+
+El flujo de reservas es una de las funcionalidades críticas.
+
+Implementa:
+1. Selección de restaurante y sucursal.
+2. Selección de fecha y hora.
+3. Número de personas.
+4. Consulta de disponibilidad.
+5. Validación de horario de apertura.
+6. Selección o asignación de mesa.
+7. Registro persistente de la reserva.
+8. Confirmación visible para el usuario.
+9. Notificación de la reserva.
+10. Modificación y cancelación.
+
+Evita que dos usuarios reserven simultáneamente la misma mesa durante intervalos incompatibles.
+
+No confíes únicamente en una validación del frontend. Resuelve la concurrencia en el backend mediante transacciones, bloqueos o restricciones apropiadas de PostgreSQL.
+
+Modela los intervalos de reserva correctamente. Dos reservas pueden ocupar una misma mesa en horarios diferentes si los intervalos y las reglas operativas lo permiten.
+
+Incluye pruebas automatizadas con solicitudes simultáneas que demuestren que no se crean reservas incompatibles.
+
+Usa fechas con zona horaria y guarda los instantes de manera consistente, preferiblemente en UTC, conservando la zona horaria IANA del restaurante para interpretar sus horarios locales.
+
+---
+
+## 7. PEDIDOS MEDIANTE CÓDIGO QR
+
+Implementa el flujo completo de pedidos desde una mesa física.
+
+1. Cada mesa tiene un código QR único asociado a un restaurante, sucursal y mesa.
+2. El cliente escanea el QR desde su teléfono.
+3. La página abre el menú correcto sin exigir una aplicación nativa.
+4. El cliente consulta categorías, productos, precios y disponibilidad.
+5. Añade productos a un carrito.
+6. Modifica cantidades o elimina productos.
+7. Envía el pedido.
+8. El backend valida la mesa, los productos, sus precios y su disponibilidad.
+9. El pedido queda guardado en PostgreSQL.
+10. Se publica un evento para que cocina reciba el pedido.
+11. La cocina acepta y procesa la orden.
+12. El cliente puede consultar su estado.
+
+Los precios y totales deben calcularse en el servidor, nunca confiar en los importes enviados por el navegador.
+
+El acceso por QR debe utilizar un identificador o token no predecible y validado por el backend. No debe exponer identificadores internos sensibles ni conceder acceso administrativo.
+
+Implementa protección contra pedidos duplicados, mediante claves de idempotencia u otro mecanismo adecuado.
+
+Si una mesa requiere un contexto de sesión, utiliza un token limitado a esa mesa y con expiración. No expongas información personal de otros clientes.
+
+No implementes cobros reales ni solicites información de tarjetas en este MVP. El pedido puede registrarse como pendiente de pago o pago en el establecimiento.
+
+---
+
+## 8. PANEL DE COCINA Y ESTADOS
+
+Crea una interfaz de cocina optimizada para tabletas y computadores.
+
+Cada pedido debe mostrar:
+- Número del pedido.
+- Restaurante y sucursal.
+- Mesa.
+- Hora de creación.
+- Productos y cantidades.
+- Observaciones relevantes.
+- Tiempo transcurrido.
+- Estado actual.
+
+Estados mínimos:
+
+`Recibido → En preparación → Listo → Entregado`
+
+Permite que los usuarios autorizados cambien los estados, con validación en el backend.
+
+Registra el historial de transiciones. No permitas cambios inválidos sin una regla de negocio explícita.
+
+Cuando cambie un estado:
+- Persiste la actualización.
+- Publica el evento correspondiente.
+- Actualiza el panel de cocina.
+- Actualiza el seguimiento del cliente.
+- Genera una notificación cuando corresponda.
+
+Usa WebSockets o Server-Sent Events para actualizar las pantallas sin recargarlas constantemente. Si el mecanismo de tiempo real no está disponible, implementa un fallback documentado.
+
+---
+
+## 9. ROLES, AUTENTICACIÓN Y SEGURIDAD
+
+Implementa control de acceso basado en roles (RBAC), verificando los permisos en el backend para cada operación.
+
+### Propietario
+- Gestiona la información del restaurante.
+- Administra sucursales.
+- Configura horarios, mesas y menús.
+- Gestiona empleados y permisos.
+- Consulta informes y recomendaciones.
+
+### Administrador
+- Gestiona reservas, mesas, productos y pedidos.
+- Supervisa la operación de las sucursales autorizadas.
+
+### Mesero
+- Consulta mesas y reservas.
+- Registra y gestiona pedidos según sus permisos.
+- Actualiza operaciones de servicio autorizadas.
+
+### Cocina
+- Consulta pedidos destinados a su sucursal.
+- Actualiza estados de preparación.
+- No puede gestionar usuarios, permisos ni datos financieros administrativos.
+
+### Cliente
+- Consulta menús públicos.
+- Gestiona sus propias reservas.
+- Realiza pedidos mediante QR.
+- Consulta únicamente sus reservas y pedidos autorizados.
+
+Requisitos de seguridad:
+- Contraseñas protegidas mediante hashing seguro, como Argon2id o bcrypt.
+- Validación del lado del servidor.
+- Protección contra inyección SQL.
+- CORS configurado explícitamente.
+- Secretos almacenados en variables de entorno.
+- Límites de solicitudes para operaciones sensibles.
+- Autorización en cada endpoint.
+- Protección contra acceso cruzado entre tenants.
+- Validación del emisor, audiencia y expiración de tokens cuando corresponda.
+- Auditoría de acciones administrativas.
+- No exponer secretos ni tokens en registros.
+- No utilizar credenciales predeterminadas inseguras en producción.
+
+Nunca confíes en el rol o el identificador del restaurante enviado por el frontend sin verificarlo en el backend.
+
+---
+
+## 10. INTERNACIONALIZACIÓN OBLIGATORIA: CINCO MERCADOS
+
+La aplicación debe admitir funcionalmente los siguientes cinco mercados:
+
+| País | Idioma y locale | Moneda |
+|---|---|---|
+| Colombia | Español `es-CO` | COP |
+| México | Español mexicano `es-MX` | MXN |
+| Estados Unidos | Inglés `en-US` | USD |
+| Brasil | Portugués brasileño `pt-BR` | BRL |
+| Japón | Japonés `ja-JP` | JPY |
+
+Implementa un selector de país o mercado visible y accesible desde la interfaz.
+
+El usuario debe poder cambiar de mercado sin que la aplicación deje de funcionar.
+
+### Traducciones
+
+Traduce todos los elementos visibles, no solamente la página inicial:
+- Navegación.
+- Formularios.
+- Botones.
+- Etiquetas.
+- Mensajes de validación.
+- Mensajes de error.
+- Confirmaciones.
+- Reservas.
+- Menús.
+- Pedidos.
+- Panel de cocina.
+- Informes.
+- Notificaciones.
+- Estados de pedidos.
+- Accesibilidad y textos de ayuda.
+
+Organiza los recursos de traducción en archivos independientes por locale. No dejes textos de interfaz codificados directamente en los componentes cuando deban traducirse.
+
+La traducción al japonés debe utilizar caracteres japoneses reales. No sustituyas las traducciones por nombres de idiomas o textos de ejemplo.
+
+### Monedas
+
+Usa el formato de moneda adecuado mediante `Intl.NumberFormat` o una solución equivalente.
+
+Todos los precios deben tener una moneda explícita en los datos de negocio. Utiliza tipos numéricos adecuados, como enteros en unidades menores cuando sea apropiado o tipos decimales precisos en PostgreSQL. Evita cálculos monetarios basados en números de punto flotante sin control.
+
+El selector de mercado debe cambiar el formato de visualización de los importes.
+
+**No conviertas automáticamente un precio de COP a USD, MXN, BRL o JPY solo por cambiar el idioma.** Cada restaurante debe definir su moneda comercial. Si se habilitan conversiones, deben usar tasas de cambio identificadas, fechadas y obtenidas de una fuente válida.
+
+No mezcles monedas en una misma suma. Las conversiones, cuando existan, deben ser explícitas y distinguirse del precio comercial original.
+
+### Fechas, horas y zona horaria
+
+- Utiliza formato local de fechas y horas.
+- Conserva la zona horaria IANA de cada sucursal.
+- Interpreta los horarios de reservas según la zona horaria del restaurante.
+- Almacena instantes de forma consistente.
+- Evita errores de fechas por diferencias de zona horaria.
+- Utiliza formatos regionales adecuados en informes y calendarios.
+
+### Persistencia de preferencias
+
+Guarda las preferencias regionales de forma apropiada para el usuario, permitiendo una selección inicial razonable y un cambio manual posterior.
+
+El idioma de la interfaz y la moneda comercial del restaurante son conceptos distintos y deben gestionarse por separado.
+
+### Pruebas de internacionalización
+
+Verifica los cinco locales y monedas. Comprueba:
+- Que el selector cambie las traducciones.
+- Que las traducciones estén completas.
+- Que los precios se formateen correctamente.
+- Que no haya errores de codificación de caracteres.
+- Que los calendarios y horarios se interpreten correctamente.
+- Que los pedidos y las reservas sigan funcionando después de cambiar el locale.
+
+---
+
+## 11. FUNCIONALIDADES DE LA APLICACIÓN
+
+Implementa un panel principal con indicadores reales calculados a partir de la base de datos.
+
+### Dashboard
+- Reservas de hoy.
+- Pedidos activos.
+- Mesas disponibles y ocupadas.
+- Pedidos pendientes de cocina.
+- Tiempo promedio de preparación, si hay datos suficientes.
+- Ingresos registrados únicamente si existen datos fiables para calcularlos.
+- Recomendaciones operativas.
+
+Los indicadores deben filtrarse por restaurante, sucursal y periodo según los permisos del usuario.
+
+### Gestión de restaurantes
+- Crear y editar restaurantes.
+- Configurar sucursales.
+- Configurar zona horaria, locale y moneda comercial.
+- Gestionar horarios.
+- Configurar mesas y capacidad.
+
+### Gestión de menú
+- Categorías.
+- Productos.
+- Descripciones.
+- Precios.
+- Disponibilidad.
+- Imágenes opcionales.
+- Activación y desactivación de productos.
+
+### Gestión de reservas
+- Calendario.
+- Disponibilidad.
+- Registro y edición.
+- Cancelación.
+- Asignación de mesas.
+- Búsqueda y filtros.
+- Estados y notificaciones.
+
+### Gestión de pedidos
+- Pedidos provenientes de QR.
+- Vista de detalles.
+- Estado y trazabilidad.
+- Validación de productos.
+- Historial.
+
+### Informes
+- Reservas por periodo.
+- Pedidos por periodo.
+- Productos más solicitados.
+- Ocupación por sucursal.
+- Tiempos de preparación.
+- Comparaciones por periodos.
+- Exportación CSV opcional.
+
+No inventes resultados analíticos. Si faltan datos, muestra un estado vacío explicativo.
+
+---
+
+## 12. RECOMENDACIONES OPERATIVAS
+
+Incluye un módulo de recomendaciones para ayudar a los restaurantes a organizar sus operaciones.
+
+Para el MVP, implementa un motor basado en reglas explícitas, no una IA ficticia.
+
+Ejemplos:
+- Alertar si se aproxima una reserva y la disponibilidad de mesas es insuficiente.
+- Identificar una carga elevada de pedidos pendientes en cocina.
+- Señalar productos con alta demanda.
+- Advertir sobre tiempos de preparación superiores al umbral configurado.
+- Recomendar revisar la asignación de mesas cuando existan conflictos.
+- Identificar franjas horarias con mayor ocupación, cuando haya suficientes datos.
+
+Cada recomendación debe incluir:
+- Título.
+- Explicación.
+- Datos que la justifican.
+- Fecha de generación.
+- Nivel de prioridad.
+- Acción sugerida.
+
+Las recomendaciones deben calcularse usando datos persistidos y reglas documentadas. No generes conclusiones estadísticas a partir de información inexistente.
+
+---
+
+## 13. DISEÑO Y EXPERIENCIA DE USUARIO
+
+Construye una interfaz moderna, profesional y apropiada para un producto SaaS comercial.
+
+Dirección visual:
+- Diseño limpio y elegante.
+- Identidad gráfica consistente para SmartRestaurant.
+- Paleta sobria con un color de acento relacionado con gastronomía y tecnología.
+- Tipografía legible.
+- Jerarquía visual clara.
+- Iconografía consistente.
+- Tarjetas, tablas y formularios bien organizados.
+- Estados de carga, error, éxito y ausencia de datos.
+- Confirmaciones para acciones destructivas.
+- Mensajes de validación comprensibles.
+
+### Adaptabilidad móvil
+
+La aplicación debe ser completamente responsive y funcionar correctamente en:
+- Teléfonos móviles.
+- Tabletas.
+- Computadores portátiles.
+- Pantallas de escritorio.
+
+El flujo del cliente por QR debe estar especialmente optimizado para móviles.
+
+La navegación administrativa debe adaptarse a pantallas pequeñas, con menús adecuados, tablas adaptables y controles táctiles accesibles.
+
+Evita:
+- Desbordamiento horizontal.
+- Botones demasiado pequeños.
+- Formularios difíciles de usar en teléfonos.
+- Textos cortados.
+- Modales que no caben en pantalla.
+- Controles que solo funcionan con mouse.
+
+Implementa accesibilidad básica, navegación por teclado, etiquetas de formularios, contraste apropiado y estados visuales comprensibles.
+
+No agregues funciones decorativas que no aporten valor.
+
+---
+
+## 14. DATOS DE DEMOSTRACIÓN Y PRIMER USO
+
+Prepara un mecanismo reproducible para inicializar la base de datos con datos de demostración.
+
+Incluye:
+- Un restaurante de demostración.
+- Al menos una sucursal.
+- Varias mesas.
+- Categorías y productos.
+- Horarios de atención.
+- Reservas de ejemplo.
+- Pedidos de ejemplo.
+- Usuarios de prueba para los roles necesarios.
+
+Proporciona un comando para crear la base de datos y cargar los datos iniciales.
+
+Las credenciales de demostración deben estar documentadas exclusivamente para desarrollo local. No incluyas contraseñas reales ni secretos de producción en el repositorio.
+
+Si se crean usuarios de prueba, muestra las credenciales de desarrollo en un archivo de documentación local apropiado y exige cambiar las credenciales antes de un despliegue público.
+
+La aplicación debe poder iniciarse en un entorno limpio siguiendo el README, sin depender de información que exista únicamente en tu sesión de desarrollo.
+
+---
+
+## 15. DOCKER Y EJECUCIÓN LOCAL
+
+Genera un `docker-compose.yml` funcional que permita iniciar los componentes necesarios para la demostración.
+
+Incluye, según la arquitectura elegida:
+- Frontend.
+- Servicios backend.
+- PostgreSQL.
+- RabbitMQ.
+- Migraciones o un mecanismo claro para ejecutarlas.
+- Volúmenes persistentes.
+- Redes internas.
+- Health checks.
+- Variables de entorno.
+- Dependencias de arranque correctamente configuradas.
+
+No asumas que iniciar un contenedor significa que la aplicación ya está lista. Los servicios deben verificar la disponibilidad de sus dependencias y recuperarse de errores temporales.
+
+Incluye:
+- `.env.example` sin secretos reales.
+- `README.md` con instrucciones detalladas.
+- Comandos de instalación, migración, inicialización, ejecución y pruebas.
+- Puertos utilizados.
+- Dependencias.
+- Solución de problemas frecuentes.
+- Instrucciones para detener y reiniciar el sistema.
+
+El proyecto debe poder ejecutarse localmente mediante un procedimiento reproducible, idealmente con Docker Compose y unos pocos comandos.
+
+No dependas de un servicio externo de pago para que el flujo básico funcione.
+
+---
+
+## 16. PRUEBAS AUTOMATIZADAS OBLIGATORIAS
+
+Implementa pruebas unitarias, de integración y, cuando sea viable, de extremo a extremo.
+
+Cubre como mínimo:
+
+### Autenticación y permisos
+- Inicio de sesión válido e inválido.
+- Acceso denegado a funciones no autorizadas.
+- Aislamiento entre restaurantes.
+- Protección de endpoints administrativos.
+
+### Reservas
+- Reserva válida.
+- Reserva fuera del horario permitido.
+- Reserva cancelada.
+- Prevención de conflictos de mesas.
+- Solicitudes simultáneas para una misma mesa y horario.
+
+### Pedidos
+- Creación desde QR.
+- Validación de precios y productos.
+- Prevención de pedidos duplicados.
+- Rechazo de productos no disponibles.
+- Persistencia del pedido.
+
+### Mensajería
+- Publicación de eventos.
+- Consumo por el servicio correspondiente.
+- Procesamiento idempotente.
+- Recuperación de mensajes fallidos.
+- Manejo de indisponibilidad temporal de RabbitMQ.
+
+### Cocina
+- Recepción del pedido.
+- Cambios de estado válidos.
+- Rechazo de transiciones inválidas.
+- Actualización del seguimiento del cliente.
+
+### Internacionalización
+- Los cinco locales.
+- Los cinco formatos de moneda.
+- Traducciones.
+- Fechas y horas.
+- Cambio de mercado sin errores.
+
+### Integración completa
+
+Demuestra mediante pruebas o una guía de validación reproducible este flujo:
+
+1. El cliente consulta un restaurante.
+2. El cliente realiza una reserva.
+3. La reserva queda guardada.
+4. Se publica un evento.
+5. El cliente escanea el QR de una mesa.
+6. Crea un pedido.
+7. El pedido queda persistido.
+8. RabbitMQ comunica el evento.
+9. Cocina recibe el pedido.
+10. Cocina cambia el estado a «En preparación».
+11. El pedido pasa a «Listo».
+12. El pedido pasa a «Entregado».
+13. El cliente y el panel reflejan los cambios.
+
+No marques como aprobada ninguna prueba que no hayas ejecutado.
+
+---
+
+## 17. DOCUMENTACIÓN ACADÉMICA DE SISTEMAS DISTRIBUIDOS
+
+Además del código, genera documentación técnica que permita explicar y defender el proyecto en la universidad.
+
+Incluye:
+
+### A. Arquitectura
+- Diagrama de componentes.
+- Diagrama de despliegue.
+- Diagrama de servicios y sus responsabilidades.
+- Diagrama de secuencia del proceso de reserva.
+- Diagrama de secuencia del pedido desde QR hasta cocina.
+- Diagrama del flujo de eventos RabbitMQ.
+- Diagrama del flujo de datos.
+
+Puedes utilizar Mermaid u otro formato textual que permita regenerar los diagramas.
+
+### B. Conceptos distribuidos demostrables
+Explica cómo se implementan:
+- Microservicios.
+- Comunicación síncrona y asíncrona.
+- Concurrencia.
+- Consistencia.
+- Idempotencia.
+- Tolerancia a fallos.
+- Reintentos.
+- Persistencia.
+- Eventual consistency.
+- Aislamiento multi-tenant.
+- Observabilidad y correlación de solicitudes.
+
+No basta con definir estos conceptos: relaciona cada uno con archivos, servicios, endpoints, eventos o pruebas concretas del proyecto.
+
+### C. Transacción principal del negocio
+
+Documenta como transacción principal:
+
+**«Conectar a un cliente que necesita una experiencia gastronómica con un restaurante que dispone de capacidad para atenderlo, coordinando su reserva, pedido y servicio en tiempo real».**
+
+Explica sus pasos:
+1. Consultar disponibilidad.
+2. Crear la reserva.
+3. Asignar la mesa.
+4. Registrar el pedido.
+5. Comunicar el pedido a cocina.
+6. Actualizar los estados.
+7. Notificar al cliente.
+
+Aclara que se trata de un flujo de negocio distribuido compuesto por operaciones locales y eventos, no de una única transacción ACID que abarque automáticamente todos los microservicios.
+
+### D. Limitaciones y decisiones
+Documenta las decisiones de arquitectura, los compromisos del MVP, los riesgos conocidos y las funciones que todavía requieren configuración externa.
+
+---
+
+## 18. CRITERIOS DE ACEPTACIÓN FINALES
+
+El proyecto solo se considerará listo para demostración cuando se hayan verificado estos puntos:
+
+1. El frontend se conecta al backend real.
+2. Los datos persisten en PostgreSQL.
+3. Los servicios pueden ejecutarse como procesos separados.
+4. Las llamadas entre servicios utilizan contratos definidos.
+5. RabbitMQ transporta eventos funcionales.
+6. Las reservas impiden conflictos de concurrencia.
+7. Los pedidos por QR llegan al servicio de cocina.
+8. Los estados se guardan y se actualizan en las pantallas correspondientes.
+9. Los roles y permisos se validan en el backend.
+10. Los datos de un restaurante no son accesibles indebidamente desde otro.
+11. Los cinco idiomas funcionan en toda la interfaz.
+12. Las monedas se muestran con sus formatos correctos y no se confunden con conversiones.
+13. Las fechas y horas respetan las zonas horarias.
+14. La aplicación es usable desde teléfonos móviles.
+15. Docker Compose permite levantar el entorno de desarrollo.
+16. Las migraciones y los datos de demostración se pueden reproducir.
+17. Las pruebas principales están implementadas y sus resultados se documentan con honestidad.
+18. La documentación académica corresponde a la arquitectura real del código.
+
+---
+
+## 19. ORDEN DE IMPLEMENTACIÓN
+
+Desarrolla el proyecto por etapas, manteniendo siempre el código integrado y ejecutable.
+
+**Etapa 1 — Estructura y arquitectura**
+- Define la estructura del repositorio.
+- Configura el frontend y los servicios.
+- Prepara PostgreSQL, Docker y RabbitMQ.
+- Crea la documentación inicial.
+
+**Etapa 2 — Infraestructura y seguridad**
+- Implementa autenticación.
+- Define los roles.
+- Configura la persistencia y las migraciones.
+- Establece el aislamiento multi-tenant.
+
+**Etapa 3 — Flujo de reservas**
+- Implementa restaurantes, sucursales, mesas y reservas.
+- Resuelve concurrencia.
+- Agrega las pruebas correspondientes.
+
+**Etapa 4 — Pedidos y cocina**
+- Implementa el menú y el QR.
+- Implementa pedidos persistentes.
+- Integra RabbitMQ.
+- Implementa la interfaz de cocina y las actualizaciones de estado.
+
+**Etapa 5 — Internacionalización**
+- Implementa las traducciones completas.
+- Implementa los cinco mercados.
+- Verifica formatos de moneda, fechas y zonas horarias.
+
+**Etapa 6 — Administración y analítica**
+- Completa el dashboard.
+- Implementa los informes.
+- Implementa el motor de recomendaciones.
+
+**Etapa 7 — Calidad**
+- Ejecuta las pruebas.
+- Corrige errores.
+- Comprueba la ejecución desde un entorno limpio.
+- Verifica la experiencia móvil.
+
+**Etapa 8 — Entrega**
+- Completa el README.
+- Entrega los diagramas.
+- Documenta los resultados de pruebas.
+- Explica cómo desplegar la aplicación y cuáles componentes requieren configuración externa.
+
+Si el proyecto es demasiado grande para una única generación, trabaja en incrementos coherentes. Mantén un registro de los archivos creados, los pendientes y los errores encontrados. No reemplaces funcionalidades completas por simulaciones para aparentar que se ha terminado.
+
+---
+
+## 20. INSTRUCCIÓN FINAL
+
+Empieza analizando las capacidades reales del entorno de Google AI Studio y selecciona una estrategia que permita generar el código más completo posible.
+
+A continuación, crea la estructura del proyecto y comienza a implementar las funcionalidades.
+
+No te limites a devolver un plan, una lista de archivos o fragmentos ilustrativos. Crea y modifica los archivos reales del proyecto mediante las capacidades disponibles en el entorno.
+
+Si no puedes ejecutar Docker, PostgreSQL, RabbitMQ o procesos de microservicios dentro de Google AI Studio, prepara los archivos de configuración, código y documentación para que puedan ejecutarse localmente fuera de la plataforma.
+
+Si una integración requiere credenciales, solicita únicamente las necesarias y documenta cómo configurarlas mediante variables de entorno. Nunca inventes credenciales ni afirmes que una integración externa funciona sin haberla verificado.
+
+Al finalizar, proporciona:
+- Resumen de las funcionalidades implementadas.
+- Arquitectura real desarrollada.
+- Estructura del proyecto.
+- Instrucciones para ejecutarlo.
+- Credenciales de demostración local, si fueron generadas.
+- Pruebas ejecutadas y resultados reales.
+- Limitaciones conocidas.
+- Próximos pasos para completar cualquier componente pendiente.
+
+**Prioridad absoluta: aplicación funcional, sistema distribuido verificable, cinco idiomas, cinco monedas, seguridad, persistencia real y ejecución reproducible.**
