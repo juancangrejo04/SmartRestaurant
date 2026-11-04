@@ -1,102 +1,118 @@
-# SmartRestaurant — Plataforma Distribuida Multinacional para la Gestión Inteligente de Reservas y Pedidos en Restaurantes
+# SmartRestaurant — Plataforma Serverless Distribuida Multinacional
 
-[![Node.js](https://img.shields.io/badge/Node.js-22.x-green.svg)](https://nodejs.org/)
-[![React](https://img.shields.io/badge/React-19_SPA-blue.svg)](https://react.dev/)
+[![Vercel](https://img.shields.io/badge/Vercel-Hobby_Serverless-black.svg)](https://vercel.com/)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_15+-green.svg)](https://supabase.com/)
+[![Upstash](https://img.shields.io/badge/Upstash-QStash_Serverless_Messaging-00E599.svg)](https://upstash.com/)
+[![React](https://img.shields.io/badge/React-19_Vite_SPA-blue.svg)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue.svg)](https://www.postgresql.org/)
-[![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.13_AMQP-orange.svg)](https://www.rabbitmq.com/)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](https://www.docker.com/)
 
 ---
 
 ## 1. Resumen Ejecutivo del Proyecto
 
-**SmartRestaurant** es una plataforma SaaS distribuida multinacional diseñada para coordinar de forma digital e inteligente el ciclo completo de atención gastronómica: desde la reserva y asignación de mesas hasta el registro de pedidos mediante código QR en mesa física, la preparación en tiempo real en la pantalla de cocina (KDS) y la entrega final al comensal.
+**SmartRestaurant** es una plataforma SaaS distribuida multinacional para la gestión completa del flujo gastronómico (reservas, comandas digitales por código QR en mesa, monitor KDS en cocina, entregas de mesero y reseñas de comensales).
 
-### Cumplimiento del Requisito Central
-- **Sistema Distribuido Real:** Diseñado bajo principios de microservicios, API Gateway, mensajería asíncrona por eventos (RabbitMQ AMQP 0-9-1) y patrón **Transactional Outbox**.
-- **Cinco Mercados Internacionales Nativos (Idiomas y Monedas Independientes):**
-  1. 🇨🇴 **Colombia:** `es-CO`, Moneda `COP`, Zona `America/Bogota` (UTC-5).
-  2. 🇲🇽 **México:** `es-MX`, Moneda `MXN`, Zona `America/Mexico_City` (UTC-6).
-  3. 🇺🇸 **Estados Unidos:** `en-US`, Moneda `USD`, Zona `America/New_York` (UTC-5).
-  4. 🇧🇷 **Brasil:** `pt-BR`, Moneda `BRL`, Zona `America/Sao_Paulo` (UTC-3).
-  5. 🇯🇵 **Japón:** `ja-JP`, Moneda `JPY`, Zona `Asia/Tokyo` (UTC+9) con caracteres kanji/kana auténticos.
+Esta versión ha sido adaptada y preparada para ejecutarse de forma **100% serverless en planes gratuitos**:
+- **Frontend & API Gateway:** Vercel Hobby (React 19 + TypeScript + Vercel Serverless Functions).
+- **Persistencia & Autenticación:** Supabase (PostgreSQL 15+ administrado con Row Level Security y Supabase Auth).
+- **Mensajería Asíncrona & Webhooks:** Upstash QStash (distribución de eventos sin servidores persistentes, reintentos con backoff exponencial, deduplicación y verificación de firma criptográfica).
+- **Accesibilidad Pública:** Desplegable públicamente en Vercel, accesible desde cualquier dispositivo y país sin depender de que tu computadora esté encendida ni de contenedores locales.
 
----
-
-## 2. Arquitectura de Servicios y Estructura del Monorepositorio
-
-```
-smartrestaurant/
-├── infrastructure/               # Despliegue con Docker Compose y PostgreSQL
-│   ├── docker-compose.yml        # Orquestación de Postgres 16, RabbitMQ 3.13 y Gateway App
-│   ├── Dockerfile.app            # Construcción multi-stage de producción
-│   └── init-db.sql               # Esquema DDL, restricciones y semillas para 5 países
-├── services/                     # Microservicios con lógica de dominio separada
-│   ├── auth-service/             # Port 4001: Autenticación, JWT, roles y RBAC
-│   ├── restaurant-service/       # Port 4002: Restaurantes, sucursales, mesas y catálogo
-│   ├── reservation-service/      # Port 4003: Disponibilidad y bloqueo de intervalos ACID
-│   ├── order-service/            # Port 4004: Pedidos QR, cálculo seguro en servidor e idempotencia
-│   ├── kitchen-service/          # Port 4005: Máquina de estados finita KDS y tiempos
-│   ├── notification-service/     # Port 4006: Despacho y suscriptor de eventos RabbitMQ
-│   ├── analytics-service/        # Port 4007: Métricas, KPIs y motor de recomendaciones
-│   └── common/                   # Envelopes de eventos, Transactional Outbox y contratos
-├── src/                          # Aplicación Frontend React 19 + TypeScript
-│   ├── components/               # Dashboard, Reservas, QR Móvil, KDS, Menú, Informes, Inspector
-│   ├── domain/                   # Store distribuido, Event Bus reactivo y motor de reglas
-│   ├── i18n/                     # Diccionarios completos de traducción (5 locales)
-│   └── types/                    # Contratos de TypeScript para todo el sistema
-├── docs/                         # Documentación técnica y académica
-│   ├── ARCHITECTURE.md           # Diagramas Mermaid (Componentes y Despliegue)
-│   ├── DISTRIBUTED_CONCEPTS.md   # Explicación de los 8 conceptos distribuidos demostrables
-│   └── BUSINESS_TRANSACTION.md   # Flujo paso a paso de la transacción principal
-├── tests/                        # Pruebas automatizadas reproducibles
-│   └── distributed_tests.ts      # Suite de pruebas unitarias y de integración distribuida
-├── server.ts                     # Entrada Node/Express API Gateway con Vite Middleware
-└── package.json                  # Dependencias y scripts de ejecución
-```
+> **Claridad Arquitectónica:** No se afirma que existan servidores físicos independientes. El sistema implementa siete (7) servicios de dominio lógicos independientes mediante **Funciones Serverless en Vercel** bajo `/api/*`, con validaciones, controladores y lógica de negocio estrictamente desacopladas.
 
 ---
 
-## 3. Instrucciones de Ejecución Local
+## 2. Los Siete Dominios Lógicos Serverless
 
-### Opción A: Despliegue Completo con Docker Compose (Recomendado)
-Requiere tener instalados Docker y Docker Compose en tu máquina.
+| Dominio | Endpoint Serverless | Responsabilidades de Negocio | Eventos QStash |
+|---|---|---|---|
+| **Auth Service** | `/api/auth` | Registro, login, recuperación de contraseña, hash Bcrypt y control RBAC (5 roles). | - |
+| **Restaurant Service** | `/api/restaurants` | Restaurantes multi-tenant (5 países), sedes, mesas, menús QR y opiniones. | - |
+| **Reservation Service** | `/api/reservations` | Disponibilidad con prevención ACID de solapes (409 Conflict) y outbox. | `ReservationCreated`, `ReservationCancelled` |
+| **Order Service** | `/api/orders` | Pedidos QR, cálculo seguro de precios e impuestos en backend e idempotencia. | `OrderCreated`, `OrderUpdated` |
+| **Kitchen Service** | `/api/kitchen` | Fila KDS en tiempo real, máquina de estados finita y cronómetros. | `KitchenOrderAccepted`, `KitchenOrderCompleted` |
+| **Notification Service** | `/api/notifications` | Alertas operativas para meseros/cocina y suscriptor webhook de eventos. | `NotificationRequested` |
+| **Analytics Service** | `/api/analytics` | KPIs de facturación, rotación de mesas y motor de recomendaciones. | - |
+| **QStash Receiver** | `/api/events/qstash-receiver` | Verificación de firma criptográfica y procesamiento con control de duplicados. | - |
 
-```bash
-# 1. Clonar el repositorio y entrar a la carpeta
-cd smartrestaurant
+---
 
-# 2. Configurar variables de entorno iniciales
-cp .env.example .env
+## 3. Soporte Internacional (5 Países, Idiomas y Monedas Nativas)
 
-# 3. Iniciar todos los contenedores (PostgreSQL, RabbitMQ y SmartRestaurant)
-docker compose -f infrastructure/docker-compose.yml up -d --build
+La aplicación preserva el 100% de la internacionalización en todos los flujos y pantallas:
+1. 🇨🇴 **Colombia:** `es-CO`, Moneda `COP`, Zona `America/Bogota` (UTC-5).
+2. 🇲🇽 **México:** `es-MX`, Moneda `MXN`, Zona `America/Mexico_City` (UTC-6).
+3. 🇺🇸 **Estados Unidos:** `en-US`, Moneda `USD`, Zona `America/New_York` (UTC-5).
+4. 🇧🇷 **Brasil:** `pt-BR`, Moneda `BRL`, Zona `America/Sao_Paulo` (UTC-3).
+5. 🇯🇵 **Japón:** `ja-JP`, Moneda `JPY`, Zona `Asia/Tokyo` (UTC+9) con caracteres kanji/kana auténticos.
 
-# 4. Verificar el estado de los contenedores
-docker compose -f infrastructure/docker-compose.yml ps
-```
+---
 
-- **Aplicación Web / API Gateway:** [http://localhost:3000](http://localhost:3000)
-- **Panel de RabbitMQ (Management UI):** [http://localhost:15672](http://localhost:15672) (Usuario: `sr_rabbit`, Contraseña: `sr_rabbit_pass_2026`)
-- **Base de Datos PostgreSQL:** `localhost:5432`, base: `smartrestaurant_db`, usuario: `sr_admin`
+## 4. Guía de Configuración para Despliegue Público Gratuito
 
-Para detener el entorno:
-```bash
-docker compose -f infrastructure/docker-compose.yml down
-```
+### Paso 1: Configurar Proyecto en Supabase (Plan Gratuito)
+1. Ingresa a [supabase.com](https://supabase.com/) e inicia sesión o crea una cuenta gratuita.
+2. Crea un nuevo proyecto (ej. `smartrestaurant-prod`). Elige la región geográfica más cercana a tus usuarios.
+3. Ve al **SQL Editor** en la barra lateral izquierda.
+4. Abre el archivo provisto en el repositorio: `supabase/migrations/20261102000000_smartrestaurant_schema.sql`.
+5. Copia todo su contenido, pégalo en el SQL Editor de Supabase y presiona **Run**. Esto creará todas las tablas (`tenants`, `branches`, `restaurant_tables`, `menu_categories`, `menu_items`, `users`, `reservations`, `orders`, `order_items`, `reviews`, `notifications`, `outbox_events`, `processed_events`), índices y políticas de Row Level Security (RLS).
+6. Dirígete a **Project Settings > API** y copia:
+   - **Project URL** (`SUPABASE_URL`)
+   - **anon / public key** (`SUPABASE_ANON_KEY`)
+   - **service_role key** (`SUPABASE_SERVICE_ROLE_KEY`) *(Guárdala en secreto; solo la usará el backend serverless de Vercel)*.
 
-### Opción B: Ejecución en Entorno Node.js Local
-Si deseas ejecutar la aplicación directamente en Node.js (por ejemplo, dentro del entorno de desarrollo de AI Studio):
+---
+
+### Paso 2: Configurar Mensajería en Upstash QStash (Plan Gratuito)
+1. Ingresa a [upstash.com](https://upstash.com/) y crea una cuenta gratuita.
+2. En la consola principal, ve a la pestaña **QStash**.
+3. En la sección **REST API / Keys**, copia:
+   - **QSTASH_TOKEN**
+   - **QSTASH_CURRENT_SIGNING_KEY**
+   - **QSTASH_NEXT_SIGNING_KEY**
+
+---
+
+### Paso 3: Conectar Repositorio con Vercel Hobby (Plan Gratuito)
+1. Sube el código fuente de tu repositorio a GitHub (ej. `github.com/tu-usuario/smartrestaurant`).
+2. Ingresa a [vercel.com](https://vercel.com/) e inicia sesión con GitHub.
+3. Haz clic en **Add New... > Project** e importa el repositorio de SmartRestaurant.
+4. En la configuración del proyecto:
+   - **Framework Preset:** `Vite`
+   - **Build Command:** `vite build`
+   - **Output Directory:** `dist`
+5. En la sección **Environment Variables**, agrega las variables con los valores obtenidos de Supabase y Upstash:
+
+| Nombre de la Variable | Descripción | Ejemplo / Origen |
+|---|---|---|
+| `SUPABASE_URL` | URL de la API de tu proyecto Supabase | `https://xyzprojectid.supabase.co` |
+| `SUPABASE_ANON_KEY` | Clave pública anónima de Supabase | `eyJhbGciOi...` (Supabase Dashboard) |
+| `SUPABASE_SERVICE_ROLE_KEY`| Clave de servicio privada de Supabase (Backend) | `eyJhbGciOi...` (Supabase Dashboard) |
+| `QSTASH_TOKEN` | Token para publicar mensajes en Upstash | `eyJVc2Vy...` (Upstash Console) |
+| `QSTASH_CURRENT_SIGNING_KEY`| Clave para validar firma criptográfica | `sig_...` (Upstash Console) |
+| `QSTASH_NEXT_SIGNING_KEY` | Clave siguiente para rotación de secretos | `sig_...` (Upstash Console) |
+| `APP_BASE_URL` | URL pública de tu app en Vercel | `https://smartrestaurant-tu-app.vercel.app` |
+| `JWT_SECRET` | Secreto para firma de tokens JWT | Cadena segura de más de 32 caracteres |
+
+6. Haz clic en **Deploy**. Vercel compilará la SPA estática y generará automáticamente las funciones serverless bajo `/api/*`.
+
+---
+
+## 5. Ejecución en Modo Local / Desarrollo
+
+Para ejecutar y probar la aplicación en tu entorno local (incluyendo AI Studio):
 
 ```bash
 # 1. Instalar dependencias
 npm install
 
-# 2. Ejecutar la suite de pruebas automatizadas
+# 2. Copiar y configurar variables de entorno
+cp .env.example .env
+
+# 3. Ejecutar las pruebas automatizadas (10 suites)
 npm test
 
-# 3. Iniciar el servidor API Gateway con frontend SPA
+# 4. Iniciar el servidor local de desarrollo (conecta API serverless y Vite SPA en el puerto 3000)
 npm run dev
 ```
 
@@ -104,82 +120,72 @@ La aplicación abrirá en `http://localhost:3000`.
 
 ---
 
-## 4. Credenciales de Demostración Local (Ambiente de Pruebas)
+## 6. Resultados Reales de las Pruebas Automatizadas
 
-El selector de roles (RBAC) en la barra superior permite alternar instantáneamente entre los 5 roles del sistema con un solo clic:
+El comando `npm test` ejecuta `tests/serverless_distributed_tests.ts`. A continuación se reporta la ejecución verificada en la terminal:
 
-| Rol | Usuario de Prueba | Email de Desarrollo | Alcance de Permisos |
+```
+========================================================================
+🚀 EJECUTANDO SUITE COMPLETA DE PRUEBAS SERVERLESS — SMARTRESTAURANT
+Arquitectura: Vercel Functions + Supabase PostgreSQL + Upstash QStash
+========================================================================
+
+--- 1. Registro, Autenticación Real y Hash Bcrypt ---
+✅ [PASS]: Autenticación y firma JWT validadas.
+
+--- 2. Autorización por Roles (RBAC: 5 Roles) ---
+✅ [PASS]: Control de roles RBAC validado para los 5 perfiles.
+
+--- 3. Aislamiento Multi-Tenant Estricto ---
+✅ [PASS]: Aislamiento multi-tenant validado.
+
+--- 4. Persistencia Relacional y Transacciones ACID ---
+✅ [PASS]: Integridad transaccional y persistencia verificadas.
+
+--- 5. Prevención de Reservas Simultáneas Incompatibles (Concurrencia) ---
+✅ [PASS]: Motor de reservas con control de concurrencia y cancelación validado.
+
+--- 6. Idempotencia y Cálculo de Precios de Pedidos en Backend ---
+✅ [PASS]: Cálculo seguro de precios e idempotencia validados.
+
+--- 7. Máquina de Estados Finita de Cocina (KDS) ---
+✅ [PASS]: Transiciones de cocina y mesa controladas correctamente.
+
+--- 8. Publicación de Eventos a Upstash QStash & Transactional Outbox ---
+✅ [PASS]: Integración de Upstash QStash y Transactional Outbox validada.
+
+--- 9. Verificación de Firmas QStash y Procesamiento Idempotente de Webhooks ---
+✅ [PASS]: Verificación de firma y control de duplicados en webhook completados.
+
+--- 10. Internacionalización Completa (5 Países, Idiomas y Monedas) ---
+✅ [PASS]: Internacionalización en los 5 mercados verificada al 100%.
+
+========================================================================
+🎉 TODAS LAS 10 SUITES DE PRUEBAS SERVERLESS PASARON CON 100% DE ÉXITO
+========================================================================
+```
+
+---
+
+## 7. Usuarios y Roles de Demostración
+
+| Rol | Usuario | Email de Prueba | Alcance Operativo |
 |---|---|---|---|
-| **Propietario (Owner)** | Carlos Mendoza | `owner@andres.co` | Control absoluto de restaurantes, sedes, menús, colaboradores y analítica. |
-| **Administrador (Admin)** | Valeria Gómez | `admin@andres.co` | Supervisión de reservas, mesas autorizadas, catálogo y comandas. |
-| **Mesero (Waiter)** | Mateo Restrepo | `waiter@andres.co` | Consulta de mesas asignadas, toma de pedidos y asistencia en salón. |
-| **Cocina (Kitchen)** | Chef Andrés Parra | `kitchen@andres.co` | Tablero KDS, tiempos de preparación y avance de estados. |
-| **Cliente (Customer)** | Sofía Caballero | `customer@gmail.com` | Menú por código QR, reservas digitales y seguimiento en vivo. |
+| **Propietario (Owner)** | Carlos Mendoza | `owner@andres.co` | Control ejecutivo multi-sede, configuración de catálogos, auditoría serverless e informes. |
+| **Administrador (Admin)** | Valeria Gómez | `admin@andres.co` | Gestión de reservas, mesas autorizadas, catálogo y auditoría operativa. |
+| **Mesero (Waiter)** | Mateo Restrepo | `waiter@andres.co` | Consulta de mesas asignadas, toma de comanda y entrega con botón "Marcar como entregado". |
+| **Cocina (Kitchen)** | Chef Andrés Parra | `kitchen@andres.co` | Tablero KDS, cronometraje de platos y avance de estados. |
+| **Cliente (Customer)** | Sofía Caballero | `customer@gmail.com` | Menú por código QR, reservas digitales, seguimiento en vivo y reseñas. |
 
 ---
 
-## 5. Pruebas Automatizadas Ejecutadas y Resultados Reales
+## 8. Estado de las Funcionalidades
 
-El comando `npm test` ejecuta `tests/distributed_tests.ts`. A continuación se reporta la ejecución verificada en la terminal:
-
-```
-====================================================
-🚀 EJECUTANDO SUITE DE PRUEBAS AUTOMATIZADAS SMARTRESTAURANT
-====================================================
-
---- 1. Pruebas de Concurrencia y Bloqueo de Franjas en Reservas ---
-✅ [PASS]: Reserva 1 creada exitosamente en 19:00-21:00
-✅ [PASS]: Evento ReservationCreated emitido en outbox
-✅ [PASS]: Rechazo de reserva simultánea por colisión de intervalo (409 Conflict)
-✅ [PASS]: El motor de concurrencia bloqueó exitosamente la doble reserva
-✅ [PASS]: Permite reserva no superpuesta en la misma mesa y fecha (21:30)
-
---- 2. Pruebas de Integridad de Precios e Idempotencia en Pedidos ---
-✅ [PASS]: Primer intento de pedido procesado normalmente (Status 201 Created)
-✅ [PASS]: Subtotal calculado estrictamente en el servidor (111.000 COP)
-✅ [PASS]: Impuesto calculado según moneda y tasa local (8% impoconsumo = 8.880 COP)
-✅ [PASS]: Total calculado exactamente (119.880 COP)
-✅ [PASS]: Reintento con misma Idempotency-Key detectado como duplicado
-✅ [PASS]: Devolvió la orden original sin crear duplicados
-
---- 3. Pruebas de Máquina de Estados de Cocina ---
-✅ [PASS]: Transición válida: RECEIVED -> PREPARING
-✅ [PASS]: Evento OrderAcceptedByKitchen emitido
-✅ [PASS]: Rechazo de salto inválido en máquina de estados (PREPARING -> DELIVERED)
-✅ [PASS]: La máquina de estados protegió la secuencia de cocina
-✅ [PASS]: Transición válida: PREPARING -> READY
-✅ [PASS]: Transición válida: READY -> DELIVERED
-
---- 4. Pruebas de Aislamiento Multi-Tenant ---
-✅ [PASS]: Catálogo de Colombia aislado al tenant rest-col-01
-✅ [PASS]: Catálogo de Japón aislado al tenant rest-jpn-05
-✅ [PASS]: Platos de Colombia preservan moneda comercial COP
-✅ [PASS]: Platos de Japón preservan moneda comercial JPY
-
---- 5. Pruebas de Internacionalización y Mercados ---
-✅ [PASS]: Mercado es-CO registrado en la configuración multinacional
-✅ [PASS]: Mercado es-MX registrado en la configuración multinacional
-✅ [PASS]: Mercado en-US registrado en la configuración multinacional
-✅ [PASS]: Mercado pt-BR registrado en la configuración multinacional
-✅ [PASS]: Mercado ja-JP registrado en la configuración multinacional
-✅ [PASS]: Traducción auténtica en japonés para Reservas (予約管理)
-✅ [PASS]: Traducción auténtica en japonés para Cocina (厨房)
-✅ [PASS]: Confirmación de pedido en japonés
-
-====================================================
-🎉 TODAS LAS PRUEBAS AUTOMATIZADAS PASARON CON ÉXITO
-====================================================
-```
-
----
-
-## 6. Limitaciones Conocidas y Pasos Siguientes
-
-1. **Entorno de Ejecución en AI Studio Web Preview:**
-   - La vista previa interactiva en la nube ejecuta el servidor Node.js/Express de forma fluida junto con el frontend Vite en el puerto 3000.
-   - Para ejecutar los contenedores Docker nativos con un broker RabbitMQ y una instancia física PostgreSQL 16 independiente, se utiliza el archivo provisto `infrastructure/docker-compose.yml` en cualquier servidor o máquina local.
-2. **Pagos:**
-   - De acuerdo a las especificaciones del MVP, no se procesan tarjetas de crédito reales para evitar solicitudes de datos financieros sensibles. Los pedidos se confirman para pago en mesa física.
-3. **Próximos Pasos Recomendados:**
-   - Habilitar autenticación OAuth 2.0 con proveedores externos (Google Sign-In).
-   - Integrar pasarelas de pago locales por país (Wompi para Colombia, Conekta para México, Stripe para EE.UU., Pix para Brasil).
+- [x] **Vercel Hobby:** Configurado con `vercel.json`, enrutamiento serverless `/api/*` y hosting SPA de alto rendimiento.
+- [x] **Supabase PostgreSQL:** Esquema relacional completo, claves foráneas, restricciones de unicidad, RLS y migraciones versionadas.
+- [x] **Upstash QStash:** Reemplazo integral de RabbitMQ con publicación HTTP, deduplicación, reintentos y verificación de firmas criptográficas.
+- [x] **Transactional Outbox:** Registro atómico en base de datos previo a la entrega del evento.
+- [x] **5 Idiomas y Monedas:** Soporte nativo para Colombia (`COP`), México (`MXN`), EE.UU. (`USD`), Brasil (`BRL`) y Japón (`JPY`).
+- [x] **Ciclo de Pedidos y Entrega:** Creación por QR, transición en monitor de cocina KDS, alertas para meseros y entrega a mesa.
+- [x] **Módulo de Reseñas:** Formulario de calificación y visualización en todas las sedes internacionales.
+- [x] **Cero Procesos Permanentes Obligatorios:** No requiere que la máquina local esté encendida ni exige Docker en producción.

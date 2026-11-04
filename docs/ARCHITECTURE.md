@@ -1,52 +1,51 @@
-# Arquitectura del Sistema Distribuido — SmartRestaurant
-
-**Nombre Académico:** Plataforma Distribuida Multinacional para la Gestión Inteligente de Reservas y Pedidos en Restaurantes.
+# Arquitectura Serverless Distribuida — SmartRestaurant
+## Vercel Hobby + Supabase (PostgreSQL + Auth) + Upstash QStash
 
 ---
 
-## 1. Diagrama de Componentes (Mermaid)
+## 1. Topología del Sistema Serverless
 
-El siguiente diagrama detalla la arquitectura de microservicios, la puerta de enlace (API Gateway), el broker de mensajería asíncrona RabbitMQ y el motor de persistencia multi-tenant PostgreSQL:
+SmartRestaurant opera como un **sistema distribuido serverless** compuesto por funciones lógicas desacopladas alojadas en la infraestructura global de Vercel, respaldado por una base de datos relacional PostgreSQL con Row Level Security (RLS) en Supabase, y coordinado asíncronamente mediante el broker serverless Upstash QStash con verificación de firmas criptográficas.
 
 ```mermaid
 graph TD
-    subgraph Frontend["Frontend SPA (React + TypeScript + Vite)"]
-        UI_Customer["Portal Cliente (Móvil QR / Reservas)"]
-        UI_KDS["Monitor KDS Cocina (Tablets)"]
+    subgraph Clients["Clientes & Dispositivos (Cualquier País)"]
+        UI_Diner["Comensal Móvil (Menú QR / Pedido en Mesa / Reseñas)"]
+        UI_Waiter["Terminal de Mesero (Toma de Comanda / Entregas)"]
+        UI_KDS["Monitor de Cocina KDS (Tablets)"]
         UI_Admin["Panel Dashboard & Analítica (Web)"]
-        UI_Inspector["Auditor de Sistemas Distribuidos"]
     end
 
-    subgraph Gateway["API Gateway / Reverse Proxy (:3000)"]
-        Router["Enrutador REST & Autenticación"]
-        CorrelationMW["Inyector de Correlation-ID (Trazabilidad)"]
-        RateLimiter["Control de Concurrencia y Rate Limiting"]
+    subgraph Vercel["Vercel Hobby Serverless Runtime (Global Edge)"]
+        SPA["Frontend SPA (React 19 + TypeScript + Vite)"]
+        Gateway["Serverless API Gateway (/api/*)"]
+        
+        subgraph DomainServices["Servicios Lógicos Independientes"]
+            AuthSvc["auth-service (/api/auth)<br/>• Supabase Auth / Bcrypt<br/>• Sesiones JWT & RBAC (5 Roles)"]
+            RestSvc["restaurant-service (/api/restaurants)<br/>• Multi-tenant 5 Países<br/>• Mesas, Menús QR & Reseñas"]
+            ResSvc["reservation-service (/api/reservations)<br/>• Bloqueo ACID de Intervalos<br/>• Prevención Overbooking"]
+            OrdSvc["order-service (/api/orders)<br/>• Tasación Backend Estricta<br/>• Idempotency-Key Protection"]
+            KitchSvc["kitchen-service (/api/kitchen)<br/>• KDS Máquina de Estados<br/>• Tiempos de Preparación"]
+            NotifSvc["notification-service (/api/notifications)<br/>• Alertas en Vivo<br/>• Suscriptor Webhook"]
+            AnalytSvc["analytics-service (/api/analytics)<br/>• Métricas & Ocupación<br/>• Motor Recomendaciones"]
+        end
+
+        Receiver["Webhook Receiver (/api/events/qstash-receiver)<br/>• Verificación de Firma Criptográfica<br/>• Control de Duplicados en processed_events"]
     end
 
-    subgraph Services["Servicios de Dominio (Microservicios Independientes)"]
-        AuthSvc["auth-service (:4001)<br/>• JWT & RBAC<br/>• Aislamiento Tenant"]
-        RestSvc["restaurant-service (:4002)<br/>• Sedes & Horarios<br/>• Mesas & Menú Multinacional"]
-        ResSvc["reservation-service (:4003)<br/>• Motor de Disponibilidad<br/>• Bloqueo ACID de Intervalos"]
-        OrdSvc["order-service (:4004)<br/>• Pedidos QR de Mesa<br/>• Tasación Servidor & Idempotencia"]
-        KitchSvc["kitchen-service (:4005)<br/>• Máquina de Estados KDS<br/>• Cronómetros de Cocina"]
-        NotifSvc["notification-service (:4006)<br/>• Notificaciones In-App<br/>• Suscriptor de Eventos"]
-        AnalytSvc["analytics-service (:4007)<br/>• KPIs Operativos<br/>• Motor de Recomendaciones"]
+    subgraph Messaging["Mensajería Asíncrona Serverless (Upstash QStash)"]
+        QStashBroker["Upstash QStash Message Broker<br/>• Retries: 3 con Backoff<br/>• Deduplication ID<br/>• Topic Routing"]
+        DLQ["QStash Dead-Letter Handling"]
     end
 
-    subgraph MessageBroker["Bus de Eventos Asíncronos (RabbitMQ AMQP 0-9-1)"]
-        Exchange["Topic Exchange: smartrestaurant.events"]
-        Q_Kitchen["Queue: kitchen.orders.queue"]
-        Q_Notif["Queue: notifications.dispatch.queue"]
-        Q_Analytics["Queue: analytics.stream.queue"]
-        DLQ["Dead-Letter Queue (DLQ)"]
-    end
-
-    subgraph Persistence["Persistencia Multi-Tenant (PostgreSQL 16)"]
-        DB[(smartrestaurant_db)]
+    subgraph Persistence["Persistencia Relacional Confiable (Supabase)"]
+        SupaAuth["Supabase Authentication"]
+        SupaDB[(PostgreSQL 15+ Engine)]
         OutboxTable[("outbox_events Table")]
+        ProcessedEventsTable[("processed_events Table")]
     end
 
-    Frontend -->|REST HTTP/JSON| Gateway
+    Clients -->|HTTPS REST| Gateway
     Gateway --> AuthSvc
     Gateway --> RestSvc
     Gateway --> ResSvc
@@ -55,63 +54,106 @@ graph TD
     Gateway --> NotifSvc
     Gateway --> AnalytSvc
 
-    ResSvc -->|INSERT + Outbox| OutboxTable
-    OrdSvc -->|INSERT + Outbox| OutboxTable
-    KitchSvc -->|UPDATE + Outbox| OutboxTable
+    AuthSvc --> SupaAuth
+    AuthSvc --> SupaDB
+    RestSvc --> SupaDB
+    
+    ResSvc -->|ACID INSERT + Outbox| SupaDB
+    OrdSvc -->|ACID INSERT + Outbox| SupaDB
+    KitchSvc -->|ACID UPDATE + Outbox| SupaDB
 
-    OutboxTable -.->|Outbox Worker Poller| Exchange
-    Exchange --> Q_Kitchen
-    Exchange --> Q_Notif
-    Exchange --> Q_Analytics
-    Exchange -.->|Failed Retries > 5| DLQ
+    SupaDB --> OutboxTable
+    
+    OrdSvc -.->|publishJSON| QStashBroker
+    ResSvc -.->|publishJSON| QStashBroker
+    KitchSvc -.->|publishJSON| QStashBroker
 
-    Q_Kitchen --> KitchSvc
-    Q_Notif --> NotifSvc
-    Q_Analytics --> AnalytSvc
+    QStashBroker -->|Signed HTTP POST Webhook| Receiver
+    Receiver -->|Validar Firma + INSERT| ProcessedEventsTable
+    Receiver -->|Trigger Action| NotifSvc
+    Receiver -->|Trigger Action| KitchSvc
+    Receiver -->|Trigger Action| AnalytSvc
 
-    AuthSvc --> DB
-    RestSvc --> DB
-    ResSvc --> DB
-    OrdSvc --> DB
-    KitchSvc --> DB
-    AnalytSvc --> DB
+    QStashBroker -.->|Failed Retries > 3| DLQ
 ```
 
 ---
 
-## 2. Diagrama de Despliegue en Infraestructura (Docker Compose)
+## 2. Diagrama de Secuencia: Ciclo de Comanda con Transactional Outbox y QStash
 
 ```mermaid
-graph LR
-    subgraph Host["Servidor / Docker Host"]
-        subgraph Net["Red Interna Bridge: sr-network"]
-            C_PG["Contenedor: smartrestaurant-postgres<br/>PostgreSQL 16 Alpine<br/>Puerto: 5432"]
-            C_RMQ["Contenedor: smartrestaurant-rabbitmq<br/>RabbitMQ 3.13 Management<br/>Puertos: 5672, 15672"]
-            C_APP["Contenedor: smartrestaurant-gateway-app<br/>Node.js 22 LTS + React Vite SPA<br/>Puerto: 3000"]
-        end
+sequenceDiagram
+    autonumber
+    actor Diner as Comensal (Móvil QR)
+    participant OrderSvc as Vercel: /api/orders
+    participant Supabase as Supabase PostgreSQL
+    participant QStash as Upstash QStash Broker
+    participant Receiver as /api/events/qstash-receiver
+    participant KDS as Monitor KDS Cocina
+    participant Waiter as Terminal de Mesero
 
-        Vol_PG[("Volumen Persistente: postgres_data")]
-        Vol_RMQ[("Volumen Persistente: rabbitmq_data")]
+    Diner->>OrderSvc: POST /api/orders (QR Token, Items, Idempotency-Key)
+    Note over OrderSvc: 1. Valida Idempotency-Key (evita duplicados)<br/>2. Tasa precios e impuestos en servidor<br/>3. Prepara Outbox Event
+    
+    critical Transactional Outbox en Supabase
+        OrderSvc->>Supabase: INSERT INTO orders (Estado: RECEIVED)
+        OrderSvc->>Supabase: INSERT INTO outbox_events (OrderCreated, CorrelationId)
     end
 
-    C_PG --- Vol_PG
-    C_RMQ --- Vol_RMQ
-    C_APP -->|TCP :5432| C_PG
-    C_APP -->|AMQP :5672| C_RMQ
+    OrderSvc-->>Diner: 201 Created (Order Number, Total, Correlation-ID)
 
-    Usuario["Navegador Web / Dispositivo Móvil"] -->|HTTP :3000| C_APP
+    OrderSvc->>QStash: publishJSON(OrderCreated, DeduplicationId: outbox_id)
+    
+    QStash->>Receiver: POST Webhook con Cabecera 'upstash-signature'
+    Note over Receiver: Valida firma criptográfica con Receiver.verify()<br/>Comprueba unicidad en processed_events
+    Receiver->>KDS: Notifica comanda disponible para preparación
+
+    KDS->>KDS: Chef presiona "Iniciar Preparación"
+    KDS->>OrderSvc: PATCH /api/kitchen/:id/status (PREPARING)
+    OrderSvc->>QStash: publishJSON(KitchenOrderAccepted)
+
+    KDS->>KDS: Chef presiona "Marcar Listo"
+    KDS->>OrderSvc: PATCH /api/kitchen/:id/status (READY)
+    OrderSvc->>QStash: publishJSON(KitchenOrderCompleted)
+    
+    QStash->>Receiver: Webhook KitchenOrderCompleted
+    Receiver->>Waiter: Notificación: Comanda lista para entregar a mesa
+    Waiter->>OrderSvc: PATCH /api/kitchen/:id/status (DELIVERED)
 ```
 
 ---
 
-## 3. Matriz de Responsabilidades de los Microservicios
+## 3. Matriz de Servicios Lógicos y Rutas API
 
-| Microservicio | Puerto | Entidades Propietarias | Eventos Publicados | Eventos Consumidos |
-|---|---|---|---|---|
-| **auth-service** | 4001 | Usuarios, Roles, Permisos, Tokens JWT | `UserRegistered` | - |
-| **restaurant-service** | 4002 | Restaurantes (Tenants), Sucursales, Mesas, Menús, Platos | `MenuPriceUpdated`, `BranchConfigured` | - |
-| **reservation-service** | 4003 | Reservas, Disponibilidad de Mesas | `ReservationCreated`, `ReservationCancelled` | - |
-| **order-service** | 4004 | Pedidos (Orders), Ítems de Pedido, Idempotencia | `OrderCreated`, `OrderConfirmed` | `OrderStatusChanged` |
-| **kitchen-service** | 4005 | Comandas KDS, Fila de Preparación, Tiempos | `OrderAcceptedByKitchen`, `OrderStatusChanged`, `OrderReady`, `OrderDelivered` | `OrderCreated` |
-| **notification-service**| 4006 | Notificaciones In-App, Despacho Email/SMS | - | `ReservationCreated`, `OrderCreated`, `OrderReady` |
-| **analytics-service** | 4007 | Agregaciones, Informes de Ocupación, Recomendaciones | `RecommendationGenerated` | `*` (Todos los eventos de negocio) |
+| Servicio Lógico | Ruta Base Vercel | Responsabilidades | Eventos Emitidos a QStash |
+|---|---|---|---|
+| **Auth Service** | `/api/auth` | Registro, login, recuperación de contraseña, JWT, RBAC (5 roles). | - |
+| **Restaurant Service** | `/api/restaurants` | Sedes (5 países), mesas, menús QR, disponibilidad y reseñas. | - |
+| **Reservation Service** | `/api/reservations` | Bloqueo ACID de intervalos, prevención 409 Conflict. | `ReservationCreated`, `ReservationCancelled` |
+| **Order Service** | `/api/orders` | Idempotencia, cálculo seguro de precios y tasas locales. | `OrderCreated`, `OrderUpdated` |
+| **Kitchen Service** | `/api/kitchen` | Fila KDS, máquina de estados finita y cronómetro. | `KitchenOrderAccepted`, `KitchenOrderCompleted` |
+| **Notification Service** | `/api/notifications` | Despacho de notificaciones in-app y alertas operativas. | `NotificationRequested` |
+| **Analytics Service** | `/api/analytics` | KPIs de ocupación, ticket promedio y recomendaciones. | - |
+| **QStash Receiver** | `/api/events/qstash-receiver` | Verificación de firma criptográfica y enrutamiento idempotente. | - |
+
+---
+
+## 4. Seguridad, Autenticación y RLS
+
+1. **Supabase Auth & Roles:**
+   - Contraseñas almacenadas exclusivamente como hashes Bcrypt (costo 10).
+   - Tokens JWT firmados con claims de rol (`role`) y tenant (`tenantId`).
+   - Los roles permitidos son: `OWNER`, `ADMIN`, `WAITER`, `KITCHEN` y `CUSTOMER`.
+   - Se prohíbe confiar en cabeceras de rol enviadas libremente por el cliente (`x-user-role` no tiene validez sin token Bearer verificado).
+
+2. **Aislamiento Multi-Tenant Estricto:**
+   - Ninguna consulta permite cruce entre tenants diferentes (`rest-col-01` jamás accede a datos de `rest-mex-02`).
+   - El middleware `requireTenantIsolation` rechaza con `403 Forbidden` cualquier intento de acceso cruzado no autorizado.
+
+3. **Verificación de Firmas de QStash:**
+   - La función `/api/events/qstash-receiver` valida que cada petición entrante provenga auténticamente de los servidores de Upstash utilizando `@upstash/qstash` `Receiver.verify({ signature, body })`.
+   - Si la firma es inválida o expirada, se rechaza inmediatamente con `401 Unauthorized`.
+   - La tabla `processed_events` garantiza que los reintentos automáticos de QStash no dupliquen mutaciones de negocio.
+
+4. **Variables de Entorno y Secretos:**
+   - `SUPABASE_SERVICE_ROLE_KEY` se utiliza **únicamente** en funciones serverless backend de Vercel. Nunca se expone al cliente ni a variables `VITE_` o `NEXT_PUBLIC_`.

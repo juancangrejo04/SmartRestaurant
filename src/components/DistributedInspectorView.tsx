@@ -23,13 +23,13 @@ import {
 } from 'lucide-react';
 
 const MICROSERVICES: MicroserviceHealth[] = [
-  { name: 'auth-service', port: 4001, status: 'UP', latencyMs: 12, version: 'v1.4.0', description: 'Tokens JWT, RBAC (5 roles), validación de identidad y tenant.' },
-  { name: 'restaurant-service', port: 4002, status: 'UP', latencyMs: 14, version: 'v2.1.0', description: 'Restaurantes, sucursales, horarios, mesas, menú y moneda comercial.' },
-  { name: 'reservation-service', port: 4003, status: 'UP', latencyMs: 18, version: 'v2.0.1', description: 'Disponibilidad de mesas con bloqueo de intervalos y prevención de solapes.' },
-  { name: 'order-service', port: 4004, status: 'UP', latencyMs: 15, version: 'v1.9.0', description: 'Toma de pedidos QR, tasación estricta en servidor, idempotencia.' },
-  { name: 'kitchen-service', port: 4005, status: 'UP', latencyMs: 11, version: 'v2.2.0', description: 'Cola KDS, máquina de estados finita de cocina y cronómetros.' },
-  { name: 'notification-service', port: 4006, status: 'UP', latencyMs: 8, version: 'v1.3.0', description: 'Consumo de eventos de negocio y despacho de notificaciones in-app/push.' },
-  { name: 'analytics-service', port: 4007, status: 'UP', latencyMs: 24, version: 'v2.0.0', description: 'Agregación de KPIs, ocupación y motor de recomendaciones operativas.' },
+  { name: 'auth-service', port: 4001, status: 'UP', latencyMs: 12, version: 'v2.0.0 (Serverless)', description: 'Supabase Auth, Bcrypt, tokens JWT, RBAC (5 roles) y validación de tenant.' },
+  { name: 'restaurant-service', port: 4002, status: 'UP', latencyMs: 14, version: 'v2.2.0 (Serverless)', description: 'Supabase PostgreSQL: Restaurantes, sucursales, mesas, menú y reseñas multi-país.' },
+  { name: 'reservation-service', port: 4003, status: 'UP', latencyMs: 18, version: 'v2.1.0 (Serverless)', description: 'Disponibilidad de mesas con bloqueo de intervalos y QStash Transactional Outbox.' },
+  { name: 'order-service', port: 4004, status: 'UP', latencyMs: 15, version: 'v2.0.0 (Serverless)', description: 'Toma de pedidos QR, tasación estricta en servidor, idempotencia y eventos QStash.' },
+  { name: 'kitchen-service', port: 4005, status: 'UP', latencyMs: 11, version: 'v2.3.0 (Serverless)', description: 'Cola KDS, máquina de estados finita de cocina y webhook receiver QStash.' },
+  { name: 'notification-service', port: 4006, status: 'UP', latencyMs: 8, version: 'v2.0.0 (Serverless)', description: 'Consumo de eventos QStash con verificación de firmas y despacho de alertas.' },
+  { name: 'analytics-service', port: 4007, status: 'UP', latencyMs: 24, version: 'v2.1.0 (Serverless)', description: 'Agregación de KPIs en tiempo real, ocupación y motor de recomendaciones.' },
 ];
 
 export const DistributedInspectorView: React.FC = () => {
@@ -78,7 +78,7 @@ export const DistributedInspectorView: React.FC = () => {
                 activeTab === 'events' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'
               }`}
             >
-              RabbitMQ Event Stream ({events.length})
+              Upstash QStash Stream ({events.length})
             </button>
             <button
               onClick={() => setActiveTab('outbox')}
@@ -94,7 +94,7 @@ export const DistributedInspectorView: React.FC = () => {
                 activeTab === 'services' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'
               }`}
             >
-              Microservicios Health
+              Funciones Serverless
             </button>
             <button
               onClick={() => setActiveTab('diagrams')}
@@ -110,13 +110,13 @@ export const DistributedInspectorView: React.FC = () => {
                 activeTab === 'theory' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'
               }`}
             >
-              Conceptos Académicos
+              Conceptos Serverless
             </button>
           </div>
         </div>
       </div>
 
-      {/* TAB 1: RABBITMQ LIVE EVENT STREAM */}
+      {/* TAB 1: UPSTASH QSTASH LIVE EVENT STREAM */}
       {activeTab === 'events' && (
         <div className="space-y-4">
           {/* Search bar & Correlation ID Tracer */}
@@ -141,8 +141,8 @@ export const DistributedInspectorView: React.FC = () => {
             {/* Events List */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm max-h-[560px] overflow-y-auto">
               <div className="px-4 py-3 bg-slate-950 border-b border-slate-800 text-xs font-bold text-slate-300 flex items-center justify-between">
-                <span>Registro de Eventos en Tiempo Real (AMQP Topic Exchange)</span>
-                <span className="text-[10px] text-slate-400 font-mono">Exchange: smartrestaurant.events</span>
+                <span>Registro de Eventos en Tiempo Real (Upstash QStash)</span>
+                <span className="text-[10px] text-slate-400 font-mono">Receiver: /api/events/qstash-receiver</span>
               </div>
               <div className="divide-y divide-slate-800">
                 {filteredEvents.map((evt) => (
@@ -350,38 +350,40 @@ export const DistributedInspectorView: React.FC = () => {
               <span>Diagrama de Componentes de la Plataforma Distribuida</span>
             </h2>
             <p className="text-xs text-slate-300">
-              Monorepositorio modular con separación estricta por dominios de negocio, API Gateway unificada y bus de eventos RabbitMQ.
+              Arquitectura Serverless distribuida con funciones Vercel, persistencia Supabase PostgreSQL y mensajería Upstash QStash.
             </p>
             <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-indigo-300 overflow-x-auto whitespace-pre">
 {`graph TD
-  Client[React Mobile/Web SPA - 5 Markets] -->|REST / HTTPS| Gateway[API Gateway / Reverse Proxy :3000]
+  Client[React Mobile/Web SPA - 5 Mercados] -->|HTTPS REST| Vercel[Vercel Serverless Gateway /api/*]
   
-  subgraph Microservices Domain
-    Gateway --> AuthSrv[auth-service :4001]
-    Gateway --> RestSrv[restaurant-service :4002]
-    Gateway --> ResSrv[reservation-service :4003]
-    Gateway --> OrdSrv[order-service :4004]
-    Gateway --> KitchSrv[kitchen-service :4005]
-    Gateway --> NotifSrv[notification-service :4006]
-    Gateway --> AnalytSrv[analytics-service :4007]
+  subgraph Vercel Serverless Functions
+    Vercel --> AuthSrv[auth-service: /api/auth]
+    Vercel --> RestSrv[restaurant-service: /api/restaurants]
+    Vercel --> ResSrv[reservation-service: /api/reservations]
+    Vercel --> OrdSrv[order-service: /api/orders]
+    Vercel --> KitchSrv[kitchen-service: /api/kitchen]
+    Vercel --> NotifSrv[notification-service: /api/notifications]
+    Vercel --> AnalytSrv[analytics-service: /api/analytics]
+    Vercel --> QStashRx[qstash-receiver: /api/events/qstash-receiver]
   end
 
-  subgraph Async Event Bus
-    ResSrv -->|Transactional Outbox| RMQ[(RabbitMQ Event Broker)]
-    OrdSrv -->|Transactional Outbox| RMQ
-    KitchSrv -->|Transactional Outbox| RMQ
-    RMQ -->|Topic: order.*| KitchSrv
-    RMQ -->|Topic: *| NotifSrv
-    RMQ -->|Topic: *| AnalytSrv
+  subgraph Upstash QStash Serverless Messaging
+    ResSrv -->|Transactional Outbox| QStash[(Upstash QStash Broker)]
+    OrdSrv -->|Transactional Outbox| QStash
+    KitchSrv -->|Transactional Outbox| QStash
+    QStash -->|Signed Webhook Delivery| QStashRx
+    QStashRx -->|Dispatch Event| KitchSrv
+    QStashRx -->|Dispatch Event| NotifSrv
+    QStashRx -->|Dispatch Event| AnalytSrv
   end
 
-  subgraph Persistence
-    AuthSrv --> PG[(PostgreSQL Multi-tenant DB)]
-    RestSrv --> PG
-    ResSrv --> PG
-    OrdSrv --> PG
-    KitchSrv --> PG
-    AnalytSrv --> PG
+  subgraph Supabase Persistence
+    AuthSrv --> SupaDB[(Supabase PostgreSQL 15+ & RLS)]
+    RestSrv --> SupaDB
+    ResSrv --> SupaDB
+    OrdSrv --> SupaDB
+    KitchSrv --> SupaDB
+    AnalytSrv --> SupaDB
   end`}
             </div>
           </div>
@@ -390,35 +392,35 @@ export const DistributedInspectorView: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
             <h2 className="text-sm font-bold text-white flex items-center space-x-2">
               <ArrowRightLeft className="w-4 h-4 text-amber-400" />
-              <span>Diagrama de Secuencia: Transacción Principal de Pedido QR a Cocina</span>
+              <span>Diagrama de Secuencia: Transacción de Pedido QR con QStash y Supabase</span>
             </h2>
             <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-amber-300 overflow-x-auto whitespace-pre">
 {`sequenceDiagram
   autonumber
   actor Diner as Comensal (Móvil QR)
-  participant OrderSvc as order-service
-  participant PG as PostgreSQL
-  participant Rabbit as RabbitMQ (AMQP)
-  participant KitchenSvc as kitchen-service
+  participant OrderSvc as Vercel: /api/orders
+  participant Supabase as Supabase PostgreSQL
+  participant QStash as Upstash QStash
+  participant Receiver as /api/events/qstash-receiver
   participant KDS as Pantalla KDS Cocina
 
-  Diner->>OrderSvc: POST /api/orders (QR Token, Items, Idempotency-Key)
-  Note over OrderSvc: 1. Valida Idempotencia<br/>2. Valida QR Token y Mesa<br/>3. Valida y tasa precios en Servidor
+  Diner->>OrderSvc: POST /api/orders (Idempotency-Key, Items)
+  Note over OrderSvc: 1. Valida Idempotencia<br/>2. Tasa precios en Servidor<br/>3. Prepara Outbox
   
-  critical Transactional Outbox
-    OrderSvc->>PG: INSERT INTO orders (status: RECEIVED)
-    OrderSvc->>PG: INSERT INTO outbox_events (OrderCreated, CorrelationId)
+  critical Transactional Outbox en Supabase
+    OrderSvc->>Supabase: INSERT INTO orders (RECEIVED)
+    OrderSvc->>Supabase: INSERT INTO outbox_events (OrderCreated)
   end
 
   OrderSvc-->>Diner: 201 Created (Order Number, Total, Correlation-ID)
   
-  OrderSvc->>Rabbit: Publish event: OrderCreated
-  Rabbit->>KitchenSvc: Consume OrderCreated
-  KitchenSvc->>KDS: WebSockets/SSE: Push nueva comanda a KDS
+  OrderSvc->>QStash: Publish JSON Event (Deduplication-ID, Retries: 3)
+  QStash->>Receiver: POST Webhook con Firma Criptográfica (upstash-signature)
+  Note over Receiver: Valida Firma + Idempotencia en processed_events
+  Receiver->>KDS: Actualiza Comanda en Tiempo Real
   
-  KDS->>KitchenSvc: PATCH /api/kitchen/:id/status (PREPARING)
-  KitchenSvc->>Rabbit: Publish event: OrderAcceptedByKitchen
-  Rabbit->>Diner: SSE: Actualiza estatus a "En Preparación"`}
+  KDS->>OrderSvc: PATCH /api/kitchen/:id/status (PREPARING)
+  OrderSvc->>QStash: Publish KitchenOrderAccepted`}
             </div>
           </div>
         </div>
