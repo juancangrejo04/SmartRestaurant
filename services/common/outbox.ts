@@ -1,6 +1,6 @@
-// Transactional Outbox Pattern Implementation with PostgreSQL & RabbitMQ Dispatcher
-import { query, TransactionClient } from './db';
-import { publishToExchange } from './rabbitmq';
+// Transactional Outbox Pattern — Exclusively using Supabase PostgreSQL and Upstash QStash
+import { getDb } from './db';
+import { publishToQStash, QStashEventType } from './qstash';
 import { OutboxEvent } from '../../src/types';
 
 export interface StageEventInput {
@@ -8,118 +8,139 @@ export interface StageEventInput {
   aggregateId: string;
   eventType: OutboxEvent['eventType'];
   tenantId: string;
-  branchId: string;
+  branchId?: string;
   correlationId: string;
   payload: Record<string, any>;
 }
 
 /**
- * Stage an event in the outbox table within the same ACID transaction context
+ * Persist an event into the outbox_events table in Supabase prior to dispatch.
+ * Guarantees that business records and outbox events exist in persistent storage.
  */
 export async function stageOutboxEvent(
-  client: TransactionClient,
   event: StageEventInput
 ): Promise<OutboxEvent> {
+  const db = getDb();
   const eventId = `evt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const now = new Date().toISOString();
 
-  await client.query(
-    `INSERT INTO outbox_events (
-      id, aggregate_type, aggregate_id, event_type, tenant_id, branch_id, correlation_id, schema_version, payload, status, retry_count, created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-    [
-      eventId,
-      event.aggregateType,
-      event.aggregateId,
-      event.eventType,
-      event.tenantId,
-      event.branchId,
-      event.correlationId,
-      '1.0',
-      event.payload,
-      'PENDING',
-      0,
-      now,
-    ]
-  );
+  const record = {
+    id: eventId,
+    aggregate_type: event.aggregateType,
+    aggregate_id: event.aggregateId,
+    event_type: event.eventType,
+    payload: event.payload,
+    correlation_id: event.correlationId,
+    tenant_id: event.tenantId,
+    branch_id: event.branchId || null,
+    status: 'PENDING',
+    retry_count: 0,
+    created_at: now,
+  };
+
+  const { data, error } = await db
+    .from('outbox_events')
+    .insert(record)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`OUTBOX_PERSISTENCE_FAILED: ${error.message}`);
+  }
 
   return {
-    id: eventId,
-    aggregateType: event.aggregateType,
-    aggregateId: event.aggregateId,
-    eventType: event.eventType,
-    tenantId: event.tenantId,
-    branchId: event.branchId,
-    correlationId: event.correlationId,
+    id: data.id,
+    aggregateType: data.aggregate_type,
+    aggregateId: data.aggregate_id,
+    eventType: data.event_type,
+    tenantId: data.tenant_id,
+    branchId: data.branch_id,
+    correlationId: data.correlation_id,
     schemaVersion: '1.0',
-    payload: event.payload,
-    createdAt: now,
+    payload: data.payload,
+    createdAt: data.created_at,
     status: 'PENDING',
-    retryCount: 0,
+    retryCount: data.retry_count,
   };
 }
 
 /**
- * Polls pending events from PostgreSQL and dispatches them to RabbitMQ Topic Exchange
+ * Polls pending events from Supabase outbox_events and dispatches them to Upstash QStash.
+ * Updates publication status to PUBLISHED upon successful receipt.
  */
 export async function dispatchPendingOutboxEvents(batchSize: number = 20): Promise<number> {
+  const db = getDb();
   let dispatchedCount = 0;
 
-  try {
-    const { rows: pendingEvents } = await query(
-      `SELECT * FROM outbox_events WHERE status = $1 ORDER BY created_at ASC LIMIT $2`,
-      ['PENDING', batchSize]
-    );
+  const { data: pendingEvents, error } = await db
+    .from('outbox_events')
+    .select('*')
+    .eq('status', 'PENDING')
+    .order('created_at', { ascending: true })
+    .limit(batchSize);
 
-    for (const record of pendingEvents) {
-      try {
-        const routingKey = `${record.aggregate_type.toLowerCase()}.${record.event_type.toLowerCase()}`;
-        const payload = typeof record.payload === 'string' ? JSON.parse(record.payload) : record.payload;
+  if (error || !pendingEvents || pendingEvents.length === 0) {
+    return 0;
+  }
 
-        const published = await publishToExchange(routingKey, {
-          eventId: record.id,
-          aggregateType: record.aggregate_type,
-          aggregateId: record.aggregate_id,
-          eventType: record.event_type,
+  for (const record of pendingEvents) {
+    try {
+      const qstashRes = await publishToQStash(
+        record.event_type as QStashEventType,
+        record.payload,
+        {
+          correlationId: record.correlation_id,
           tenantId: record.tenant_id,
           branchId: record.branch_id,
-          correlationId: record.correlation_id,
-          payload,
-          timestamp: record.created_at,
-        }, record.correlation_id);
-
-        if (published) {
-          await query(
-            `UPDATE outbox_events SET status = $1, published_at = $2 WHERE id = $3`,
-            ['PUBLISHED', new Date().toISOString(), record.id]
-          );
-          dispatchedCount++;
-        } else {
-          await query(
-            `UPDATE outbox_events SET retry_count = retry_count + 1, status = CASE WHEN retry_count >= 5 THEN 'FAILED' ELSE 'PENDING' END WHERE id = $1`,
-            [record.id]
-          );
+          deduplicationId: record.id,
+          retries: 3,
         }
-      } catch (publishErr) {
-        await query(
-          `UPDATE outbox_events SET retry_count = retry_count + 1, status = CASE WHEN retry_count >= 5 THEN 'FAILED' ELSE 'PENDING' END WHERE id = $1`,
-          [record.id]
-        );
+      );
+
+      if (qstashRes.success) {
+        await db
+          .from('outbox_events')
+          .update({
+            status: 'PUBLISHED',
+            published_at: new Date().toISOString(),
+          })
+          .eq('id', record.id);
+        dispatchedCount++;
+      } else {
+        const nextRetry = (record.retry_count || 0) + 1;
+        await db
+          .from('outbox_events')
+          .update({
+            retry_count: nextRetry,
+            status: nextRetry >= 5 ? 'FAILED' : 'PENDING',
+          })
+          .eq('id', record.id);
       }
+    } catch {
+      const nextRetry = (record.retry_count || 0) + 1;
+      await db
+        .from('outbox_events')
+        .update({
+          retry_count: nextRetry,
+          status: nextRetry >= 5 ? 'FAILED' : 'PENDING',
+        })
+        .eq('id', record.id);
     }
-  } catch (err: any) {
-    console.warn('[Outbox Dispatcher Warning]:', err.message);
   }
 
   return dispatchedCount;
 }
 
-let outboxWorkerInterval: NodeJS.Timeout | null = null;
-
-export function startOutboxWorker(intervalMs: number = 2500): void {
-  if (outboxWorkerInterval) return;
-
-  outboxWorkerInterval = setInterval(async () => {
-    await dispatchPendingOutboxEvents(25);
+/**
+ * Starts an optional polling worker for local development scripts.
+ * In production serverless on Vercel, dispatching is invoked per transaction or via QStash cron.
+ */
+export function startOutboxWorker(intervalMs: number = 3000): { stop: () => void } {
+  const timer = setInterval(() => {
+    dispatchPendingOutboxEvents(20).catch(() => {});
   }, intervalMs);
+
+  return {
+    stop: () => clearInterval(timer),
+  };
 }

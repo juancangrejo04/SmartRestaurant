@@ -10,7 +10,7 @@
 
 En una arquitectura de microservicios, esta transacción **NO es una única transacción ACID monolítica** de base de datos que abarque todos los servicios. Un bloqueo global de dos fases (2PC / Two-Phase Commit) generaría alta latencia y acoplamiento severo entre servicios.
 
-En su lugar, SmartRestaurant implementa una **transacción distribuida por orquestación basada en eventos y consistencia eventual (Eventual Consistency)**, compuesta por transacciones locales atómicas en cada servicio y eventos asíncronos transportados a través de RabbitMQ mediante el patrón **Transactional Outbox**.
+En su lugar, SmartRestaurant implementa una **transacción distribuida por orquestación basada en eventos y consistencia eventual (Eventual Consistency)**, compuesta por transacciones locales atómicas en cada servicio (Supabase PostgreSQL) y eventos asíncronos transportados a través de **Upstash QStash** mediante el patrón **Transactional Outbox**.
 
 ---
 
@@ -24,7 +24,7 @@ sequenceDiagram
   participant ResSvc as reservation-service
   participant TableSvc as restaurant-service
   participant OrderSvc as order-service
-  participant RMQ as RabbitMQ Bus
+  participant QStash as Upstash QStash
   participant KitchenSvc as kitchen-service
   participant NotifSvc as notification-service
 
@@ -55,23 +55,23 @@ sequenceDiagram
     OrderSvc->>OrderSvc: INSERT INTO outbox_events (OrderCreated)
   end
   OrderSvc-->>Cliente: 201 Created (Número de Orden, Total, Tiempo estimado)
-  OrderSvc->>RMQ: Publica evento: OrderCreated
-  RMQ->>KitchenSvc: Consumo de OrderCreated -> Inserción en Fila KDS
+  OrderSvc->>QStash: Publica evento: OrderCreated
+  QStash->>KitchenSvc: Consumo de OrderCreated -> Inserción en Fila KDS
 
   %% Paso 6 y 7: Actualización de Estados y Notificación
   Note over KitchenSvc, Cliente: PASO 6 y 7: Preparación en Cocina y Notificación en Tiempo Real
   KitchenSvc->>KitchenSvc: Chef pulsa "Iniciar Preparación" (PATCH /api/kitchen/:id/status)
-  KitchenSvc->>RMQ: Publica evento: OrderAcceptedByKitchen
-  RMQ->>Cliente: SSE: Estado cambia a "En preparación"
+  KitchenSvc->>QStash: Publica evento: OrderAcceptedByKitchen
+  QStash->>Cliente: Webhook/SSE: Estado cambia a "En preparación"
 
   KitchenSvc->>KitchenSvc: Chef pulsa "Marcar Listo" (PATCH /api/kitchen/:id/status)
-  KitchenSvc->>RMQ: Publica evento: OrderReady
-  RMQ->>Cliente: SSE: Estado cambia a "Listo para servir"
-  RMQ->>NotifSvc: Notificación al mesero de salón
+  KitchenSvc->>QStash: Publica evento: OrderReady
+  QStash->>Cliente: Webhook/SSE: Estado cambia a "Listo para servir"
+  QStash->>NotifSvc: Notificación al mesero de salón
 
   KitchenSvc->>KitchenSvc: Mesero confirma "Entregado" (PATCH /api/kitchen/:id/status)
-  KitchenSvc->>RMQ: Publica evento: OrderDelivered
-  RMQ->>Cliente: SSE: Comanda finalizada exitosamente
+  KitchenSvc->>QStash: Publica evento: OrderDelivered
+  QStash->>Cliente: Webhook/SSE: Comanda finalizada exitosamente
 ```
 
 ---
@@ -82,6 +82,6 @@ sequenceDiagram
    - El bloqueo de mesas para una misma franja horaria es inmediatamente consistente dentro del `reservation-service` gracias a la validación atómica en PostgreSQL.
    - El cálculo de totales de platos e impuestos se verifica inmediatamente en el `order-service` antes de persistir la comanda.
 2. **Garantía Eventual (Eventual Consistency):**
-   - La llegada de la comanda a la pantalla del cocinero (KDS) y la actualización de métricas en el `analytics-service` se propagan de manera asíncrona a través de RabbitMQ. Si el broker experimenta una micro-desconexión, los mensajes no se pierden gracias a la tabla local `outbox_events` y son reintentados automáticamente.
+   - La llegada de la comanda a la pantalla del cocinero (KDS) y la actualización de métricas en el `analytics-service` se propagan de manera asíncrona a través de Upstash QStash. Si el endpoint receptor experimenta una micro-desconexión, los mensajes no se pierden gracias a la tabla local `outbox_events` en Supabase y son reintentados automáticamente con verificación de firmas criptográficas.
 3. **Idempotencia:**
    - La cabecera `Idempotency-Key` en los pedidos y la deduplicación por `event_id` en los consumidores aseguran que ningún cobro ni comanda se dupliquen por reintentos de red.

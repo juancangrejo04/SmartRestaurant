@@ -310,7 +310,7 @@ export const esCO: TranslationDictionary = {
   architecture: {
     title: 'Inspección de Arquitectura y Patrones Distribuidos',
     subtitle: 'Supervisión en vivo de eventos Outbox, correlaciones y resiliencia.',
-    eventBusTitle: 'Event Bus RabbitMQ (Simulado In-Memory)',
+    eventBusTitle: 'Event Bus Upstash QStash (Serverless)',
     outboxTitle: 'Patrón Transactional Outbox',
     correlationIdTitle: 'Trazabilidad con Correlation-ID',
     servicesHealthTitle: 'Estado de Microservicios',

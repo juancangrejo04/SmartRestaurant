@@ -310,7 +310,7 @@ export const enUS: TranslationDictionary = {
   architecture: {
     title: 'Distributed Systems & Architecture Inspection',
     subtitle: 'Live inspection of outbox events, correlation traces, and resilience patterns.',
-    eventBusTitle: 'RabbitMQ Event Bus (In-Memory Simulation)',
+    eventBusTitle: 'Upstash QStash Event Bus (Serverless)',
     outboxTitle: 'Transactional Outbox Pattern',
     correlationIdTitle: 'Correlation-ID Traceability',
     servicesHealthTitle: 'Microservice Health',

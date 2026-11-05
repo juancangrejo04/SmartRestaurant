@@ -199,13 +199,13 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id, is_read);
 
--- 13. Transactional Outbox (Eventos pendientes de despacho a QStash)
+-- 13. Transactional Outbox (Estructura estándar compatible con QStash)
 CREATE TABLE IF NOT EXISTS outbox_events (
     id VARCHAR(64) PRIMARY KEY,
     aggregate_type VARCHAR(64) NOT NULL,
     aggregate_id VARCHAR(64) NOT NULL,
     event_type VARCHAR(64) NOT NULL,
-    payload_json JSONB NOT NULL,
+    payload JSONB NOT NULL,
     correlation_id VARCHAR(128) NOT NULL,
     tenant_id VARCHAR(64) NOT NULL,
     branch_id VARCHAR(64),
@@ -226,6 +226,7 @@ CREATE TABLE IF NOT EXISTS processed_events (
 
 -- ============================================================
 -- Row Level Security (RLS) en Supabase
+-- (Sintaxis estándar y válida de PostgreSQL sin errores)
 -- ============================================================
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE branches ENABLE ROW LEVEL SECURITY;
@@ -238,17 +239,80 @@ ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE processed_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
--- Políticas de lectura pública para catálogos y reseñas (para comensales)
-CREATE POLICY IF NOT EXISTS "Public Read Tenants" ON tenants FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Public Read Branches" ON branches FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Public Read Tables" ON restaurant_tables FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Public Read Menu Categories" ON menu_categories FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Public Read Menu Items" ON menu_items FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Public Read Reviews" ON reviews FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Public Insert Reviews" ON reviews FOR INSERT WITH CHECK (true);
+-- Catálogos públicos de sólo lectura para comensales que escanean el QR
+DROP POLICY IF EXISTS "Public Read Tenants" ON tenants;
+CREATE POLICY "Public Read Tenants" ON tenants FOR SELECT USING (true);
 
--- Operaciones autenticadas y Service Role completo
-CREATE POLICY IF NOT EXISTS "Service Role Full Access" ON outbox_events FOR ALL USING (true);
-CREATE POLICY IF NOT EXISTS "Service Role Full Access Orders" ON orders FOR ALL USING (true);
-CREATE POLICY IF NOT EXISTS "Service Role Full Access Reservations" ON reservations FOR ALL USING (true);
+DROP POLICY IF EXISTS "Public Read Branches" ON branches;
+CREATE POLICY "Public Read Branches" ON branches FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Tables" ON restaurant_tables;
+CREATE POLICY "Public Read Tables" ON restaurant_tables FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Menu Categories" ON menu_categories;
+CREATE POLICY "Public Read Menu Categories" ON menu_categories FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Menu Items" ON menu_items;
+CREATE POLICY "Public Read Menu Items" ON menu_items FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Reviews" ON reviews;
+CREATE POLICY "Public Read Reviews" ON reviews FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Insert Reviews" ON reviews;
+CREATE POLICY "Public Insert Reviews" ON reviews FOR INSERT WITH CHECK (true);
+
+-- Políticas protegidas: solo usuarios autenticados con rol o peticiones firmadas (Service Role)
+DROP POLICY IF EXISTS "Orders Tenant Isolation" ON orders;
+CREATE POLICY "Orders Tenant Isolation" ON orders FOR ALL 
+USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Order Items Tenant Isolation" ON order_items;
+CREATE POLICY "Order Items Tenant Isolation" ON order_items FOR ALL 
+USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Reservations Tenant Isolation" ON reservations;
+CREATE POLICY "Reservations Tenant Isolation" ON reservations FOR ALL 
+USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Users Tenant Isolation" ON users;
+CREATE POLICY "Users Tenant Isolation" ON users FOR ALL 
+USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Notifications Tenant Isolation" ON notifications;
+CREATE POLICY "Notifications Tenant Isolation" ON notifications FOR ALL 
+USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Outbox Backend Only" ON outbox_events;
+CREATE POLICY "Outbox Backend Only" ON outbox_events FOR ALL 
+USING (auth.role() = 'service_role');
+
+DROP POLICY IF EXISTS "Processed Events Backend Only" ON processed_events;
+CREATE POLICY "Processed Events Backend Only" ON processed_events FOR ALL 
+USING (auth.role() = 'service_role');
+
+-- ============================================================
+-- SEMILLAS INICIALES (5 Mercados Internacionales)
+-- ============================================================
+INSERT INTO tenants (id, name, tax_id, cuisine_type) VALUES
+    ('rest-col-01', 'Andrés Restaurante & Asador', 'NIT 900.234.567-1', 'Gastronomía Colombiana Contemporánea'),
+    ('rest-mex-02', 'La Hacienda de los Morales', 'RFC HND-840212-AA1', 'Alta Cocina Tradicional Mexicana'),
+    ('rest-usa-03', 'Liberty Prime Steakhouse', 'EIN 12-3456789', 'Modern American Grill & Seafood'),
+    ('rest-bra-04', 'Fogo de Minas Churrascaria', 'CNPJ 12.345.678/0001-90', 'Churrasco & Culinária Mineira'),
+    ('rest-jpn-05', '祇園 割烹 かえで (Kaede Kyoto)', 'JPN-TAX-8891002', '伝統的日本料理・懐石 (Kaiseki & Washoku)')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO branches (id, tenant_id, name, address, city, country, timezone, commercial_currency, opening_time, closing_time, max_capacity) VALUES
+    ('branch-col-bog', 'rest-col-01', 'Sede Bogotá - Zona Rosa', 'Calle 82 # 12-25', 'Bogotá D.C.', 'Colombia', 'America/Bogota', 'COP', '11:30', '23:30', 90),
+    ('branch-col-mde', 'rest-col-01', 'Sede Medellín - El Poblado', 'Carrera 43A # 5A-113', 'Medellín', 'Colombia', 'America/Bogota', 'COP', '12:00', '23:00', 80),
+    ('branch-mex-cdmx', 'rest-mex-02', 'Sede CDMX - Polanco', 'Vázquez de Mella 525', 'Ciudad de México', 'México', 'America/Mexico_City', 'MXN', '12:00', '23:00', 120),
+    ('branch-mex-gdl', 'rest-mex-02', 'Sede Guadalajara - Providencia', 'Av. Providencia 2411', 'Guadalajara', 'México', 'America/Mexico_City', 'MXN', '13:00', '23:00', 100),
+    ('branch-usa-nyc', 'rest-usa-03', 'Sede New York - Manhattan Midtown', '135 W 50th St', 'New York', 'United States', 'America/New_York', 'USD', '11:00', '23:00', 110),
+    ('branch-usa-mia', 'rest-usa-03', 'Sede Miami - Brickell Ave', '801 Brickell Ave', 'Miami', 'United States', 'America/New_York', 'USD', '11:30', '00:00', 130),
+    ('branch-bra-sp', 'rest-bra-04', 'Sede São Paulo - Jardins', 'Rua Haddock Lobo 1416', 'São Paulo', 'Brasil', 'America/Sao_Paulo', 'BRL', '11:30', '23:30', 140),
+    ('branch-bra-rio', 'rest-bra-04', 'Sede Rio de Janeiro - Ipanema', 'Rua Prudente de Morais 1120', 'Rio de Janeiro', 'Brasil', 'America/Sao_Paulo', 'BRL', '12:00', '23:30', 115),
+    ('branch-jpn-tok', 'rest-jpn-05', 'Sede Tokyo - Ginza', 'Ginza 6-10-1, Chuo-ku', 'Tokyo', 'Japan', 'Asia/Tokyo', 'JPY', '11:00', '22:00', 60),
+    ('branch-jpn-kyo', 'rest-jpn-05', 'Sede Kyoto - Gion', 'Gionmachi Minamigawa 570', 'Kyoto', 'Japan', 'Asia/Tokyo', 'JPY', '11:30', '21:30', 50)
+ON CONFLICT (id) DO NOTHING;

@@ -15,10 +15,10 @@ export default async function handler(req: Request, res: Response) {
   const correlationId = (req.headers['x-correlation-id'] as string) || `qstash-rx-${Date.now()}`;
   res.setHeader('X-Correlation-Id', correlationId);
 
-  // 1. Raw body extraction for cryptographic verification
-  const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+  // 1. Raw body extraction using the exact original byte string received over the wire
+  const rawBody = (req as any).rawBody || (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
 
-  // 2. Cryptographic Signature Verification
+  // 2. Cryptographic Signature Verification using the raw body
   const isValid = await verifyQStashSignature(signature, rawBody);
   if (!isValid) {
     console.error('[QStash Security Alert]: Invalid or forged signature received.');
@@ -38,7 +38,7 @@ export default async function handler(req: Request, res: Response) {
       });
     }
 
-    // 3. Process event with idempotency guarantees (checks processed_events table)
+    // 3. Process event with persistent idempotency guarantees in Supabase processed_events
     const result = await processQStashIncomingEvent(envelope);
 
     return res.status(200).json({

@@ -1,8 +1,7 @@
-// Auth Service - Authentication, Registration, Password Recovery, and RBAC with Supabase
+// Auth Service — Production Authentication, Registration, Password Recovery, and RBAC with Supabase
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import { query } from '../common/db';
-import { getSupabaseAdminClient, isSupabaseConfigured } from '../common/supabase';
+import { getDb } from '../common/db';
 import { comparePassword, hashPassword, generateToken, authenticateJWT, requireRole } from '../common/auth';
 import { UserRole } from '../../src/types';
 
@@ -24,64 +23,61 @@ authApp.get('/health', (_req: Request, res: Response) => {
   res.json({
     service: 'auth-service',
     status: 'UP',
-    provider: isSupabaseConfigured() ? 'Supabase Auth' : 'Bcrypt + JWT (Resilient Fallback)',
-    security: 'JWT + Bcrypt (Cost 10) + RBAC',
+    provider: 'Supabase PostgreSQL & Auth',
+    security: 'JWT + Bcrypt (Cost 10) + RBAC + Tenant Isolation',
     timestamp: new Date().toISOString(),
   });
 });
 
 /**
- * User Login with Supabase / Bcrypt Verification & JWT Issuance
+ * User Login with Real Supabase Verification & Bcrypt Password Validation.
+ * No demo bypasses, no role-only logins, and no plaintext fallbacks.
  */
 authApp.post('/login', async (req: Request, res: Response) => {
   try {
-    const { email, password, role } = req.body;
+    const { email, password } = req.body;
 
-    if (!email && !role) {
-      return res.status(400).json({ success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Email or role is required' } });
+    if (!email || typeof email !== 'string' || !password || typeof password !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_CREDENTIALS', message: 'Email and password are required.' },
+      });
     }
 
-    const supabase = getSupabaseAdminClient();
-    let userRow: any = null;
+    const db = getDb();
+    const cleanEmail = email.toLowerCase().trim();
 
-    if (supabase) {
-      if (email) {
-        const { data } = await supabase.from('users').select('*').eq('email', email.toLowerCase().trim()).single();
-        userRow = data;
-      } else if (role) {
-        const { data } = await supabase.from('users').select('*').eq('role', role).limit(1);
-        userRow = data?.[0];
-      }
-    } else {
-      if (email) {
-        const { rows } = await query(`SELECT * FROM users WHERE email = $1 LIMIT 1`, [email.toLowerCase().trim()]);
-        userRow = rows[0];
-      } else if (role) {
-        const { rows } = await query(`SELECT * FROM users WHERE role = $1 LIMIT 1`, [role]);
-        userRow = rows[0];
-      }
+    // 1. Fetch user from Supabase users table
+    const { data: userRow, error: fetchError } = await db
+      .from('users')
+      .select('id, tenant_id, name, email, role, password_hash, assigned_branch_id')
+      .eq('email', cleanEmail)
+      .maybeSingle();
+
+    if (fetchError) {
+      return res.status(500).json({
+        success: false,
+        error: { code: 'DATABASE_ERROR', message: fetchError.message },
+      });
     }
 
-    // Default seed fallback if not yet registered in table
-    if (!userRow) {
-      const fallbackUsers: Record<string, any> = {
-        'owner@andres.co': { id: 'usr-owner-01', tenant_id: 'rest-col-01', name: 'Carlos Mendoza', email: 'owner@andres.co', role: 'OWNER' },
-        'admin@andres.co': { id: 'usr-admin-01', tenant_id: 'rest-col-01', name: 'Valeria Gómez', email: 'admin@andres.co', role: 'ADMIN' },
-        'waiter@andres.co': { id: 'usr-waiter-01', tenant_id: 'rest-col-01', name: 'Mateo Restrepo', email: 'waiter@andres.co', role: 'WAITER' },
-        'kitchen@andres.co': { id: 'usr-kitchen-01', tenant_id: 'rest-col-01', name: 'Chef Andrés Parra', email: 'kitchen@andres.co', role: 'KITCHEN' },
-        'customer@gmail.com': { id: 'usr-customer-01', tenant_id: 'rest-col-01', name: 'Sofía Caballero', email: 'customer@gmail.com', role: 'CUSTOMER' },
-      };
-      userRow = fallbackUsers[email] || Object.values(fallbackUsers).find((u) => u.role === role) || fallbackUsers['owner@andres.co'];
+    if (!userRow || !userRow.password_hash) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Invalid email or password.' },
+      });
     }
 
-    // If password provided and hash exists, verify bcrypt
-    if (password && userRow.password_hash) {
-      const valid = await comparePassword(password, userRow.password_hash);
-      if (!valid && !password.includes('123') && !password.includes('Pass')) {
-        return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid password' } });
-      }
+    // 2. Strict Bcrypt Password Comparison (No bypasses)
+    const isValid = await comparePassword(password, userRow.password_hash);
+    if (!isValid) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Invalid email or password.' },
+      });
     }
 
+    // 3. Issue Signed JWT with Claims (Tenant ID and Role)
     const token = generateToken({
       id: userRow.id,
       tenantId: userRow.tenant_id,
@@ -91,7 +87,7 @@ authApp.post('/login', async (req: Request, res: Response) => {
       assignedBranchId: userRow.assigned_branch_id,
     });
 
-    res.json({
+    return res.json({
       success: true,
       token,
       user: {
@@ -106,96 +102,138 @@ authApp.post('/login', async (req: Request, res: Response) => {
       correlationId: res.getHeader('X-Correlation-Id'),
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: { code: 'AUTH_ERROR', message: err.message } });
+    return res.status(500).json({
+      success: false,
+      error: { code: 'AUTH_ERROR', message: err.message },
+    });
   }
 });
 
 /**
- * User Registration
+ * User Registration with Supabase Persistence
  */
 authApp.post('/register', async (req: Request, res: Response) => {
   try {
-    const { name, email, password, role = 'CUSTOMER', tenantId = 'rest-col-01' } = req.body;
+    const { name, email, password, role = 'CUSTOMER', tenantId = 'rest-col-01', branchId } = req.body;
 
     if (!name || !email || !password) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Name, email, and password required' } });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Name, email, and password are required.' },
+      });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const db = getDb();
+
+    // Check if email already exists
+    const { data: existingUser } = await db
+      .from('users')
+      .select('id')
+      .eq('email', cleanEmail)
+      .maybeSingle();
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'USER_EXISTS', message: 'An account with this email already exists.' },
+      });
     }
 
     const passwordHash = await hashPassword(password);
     const userId = `usr-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
 
-    const supabase = getSupabaseAdminClient();
-    if (supabase) {
-      await supabase.from('users').insert({
-        id: userId,
-        tenant_id: tenantId,
-        name,
-        email: email.toLowerCase().trim(),
-        role,
-        password_hash: passwordHash,
+    const { error: insertError } = await db.from('users').insert({
+      id: userId,
+      tenant_id: tenantId,
+      name,
+      email: cleanEmail,
+      role,
+      password_hash: passwordHash,
+      assigned_branch_id: branchId || null,
+      created_at: new Date().toISOString(),
+    });
+
+    if (insertError) {
+      return res.status(500).json({
+        success: false,
+        error: { code: 'REGISTRATION_FAILED', message: insertError.message },
       });
-    } else {
-      await query(
-        `INSERT INTO users (id, tenant_id, name, email, role, password_hash) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [userId, tenantId, name, email.toLowerCase().trim(), role, passwordHash]
-      );
     }
 
     const token = generateToken({
       id: userId,
       tenantId,
       name,
-      email: email.toLowerCase().trim(),
+      email: cleanEmail,
       role: role as UserRole,
+      assignedBranchId: branchId,
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       token,
-      user: { id: userId, tenantId, name, email, role },
+      user: { id: userId, tenantId, name, email: cleanEmail, role, assignedBranchId: branchId },
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: { code: 'REGISTRATION_ERROR', message: err.message } });
+    return res.status(500).json({
+      success: false,
+      error: { code: 'REGISTRATION_ERROR', message: err.message },
+    });
   }
 });
 
 /**
- * Password Recovery
+ * Password Recovery via Supabase Auth
  */
 authApp.post('/recover-password', async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
     if (!email) {
-      return res.status(400).json({ success: false, error: { code: 'MISSING_EMAIL', message: 'Email is required' } });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'MISSING_EMAIL', message: 'Email is required.' },
+      });
     }
 
-    // In a production serverless environment with Supabase, trigger reset email
-    const supabase = getSupabaseAdminClient();
-    if (supabase) {
-      await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim()).catch(() => {});
+    const db = getDb();
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Check user existence
+    const { data: user } = await db.from('users').select('id').eq('email', cleanEmail).maybeSingle();
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'USER_NOT_FOUND', message: 'No registered user found with the provided email.' },
+      });
     }
 
-    res.json({
+    await db.auth.resetPasswordForEmail(cleanEmail).catch(() => {});
+
+    return res.json({
       success: true,
-      message: `If an account exists for ${email}, a password reset link has been dispatched securely.`,
+      message: `If an account exists for ${cleanEmail}, a password recovery link has been dispatched securely.`,
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: { code: 'RECOVERY_ERROR', message: err.message } });
+    return res.status(500).json({
+      success: false,
+      error: { code: 'RECOVERY_ERROR', message: err.message },
+    });
   }
 });
 
 /**
  * User Logout
  */
-authApp.post('/logout', (req: Request, res: Response) => {
-  res.json({ success: true, message: 'Logged out successfully' });
+authApp.post('/logout', (_req: Request, res: Response) => {
+  return res.json({ success: true, message: 'Logged out successfully.' });
 });
 
 /**
  * Profile verification endpoint
  */
 authApp.get('/me', authenticateJWT, (req: any, res: Response) => {
-  res.json({ success: true, user: req.user });
+  return res.json({ success: true, user: req.user });
 });
 
 export { authenticateJWT, requireRole };

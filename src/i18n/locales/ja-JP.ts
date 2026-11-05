@@ -310,7 +310,7 @@ export const jaJP: TranslationDictionary = {
   architecture: {
     title: '分散アーキテクチャ監査・パターン検証',
     subtitle: 'Outboxイベント、Correlation-ID、および耐障害性のリアルタイム監視。',
-    eventBusTitle: 'RabbitMQ イベントバス (メモリ内シミュレーション)',
+    eventBusTitle: 'Upstash QStash イベントバス (サーバーレス)',
     outboxTitle: 'Transactional Outbox パターン',
     correlationIdTitle: 'Correlation-ID による追跡性',
     servicesHealthTitle: 'マイクロサービス稼働状態',

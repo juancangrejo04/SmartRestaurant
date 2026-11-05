@@ -9,17 +9,22 @@ import { kitchenApp } from '../services/kitchen-service';
 import { notificationApp } from '../services/notification-service';
 import { analyticsApp } from '../services/analytics-service';
 import { checkSupabaseHealth } from '../services/common/supabase';
-import {
-  isQStashConfigured,
-  isQStashReceiverConfigured,
-  getQStashAuditHistory,
-  dispatchPendingOutboxToQStash,
-} from '../services/common/qstash';
+import { isQStashConfigured, isQStashReceiverConfigured } from '../services/common/qstash';
+import { dispatchPendingOutboxEvents } from '../services/common/outbox';
+import { getDb } from '../services/common/db';
 import qstashReceiverHandler from './events/qstash-receiver';
 
 export const app = express();
 app.use(cors());
-app.use(express.json());
+
+// Preserve rawBody for cryptographic signature verification
+app.use(
+  express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf.toString();
+    },
+  })
+);
 
 // Global Correlation ID Middleware
 app.use((req, res, next) => {
@@ -48,16 +53,39 @@ app.post('/api/events/qstash-receiver', (req, res) => {
 app.post('/api/events/dispatch-outbox', async (req, res) => {
   try {
     const batchSize = Number(req.query.batchSize) || 20;
-    const result = await dispatchPendingOutboxToQStash(batchSize);
-    res.json({ success: true, ...result, timestamp: new Date().toISOString() });
+    const dispatched = await dispatchPendingOutboxEvents(batchSize);
+    return res.json({ success: true, dispatched, timestamp: new Date().toISOString() });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// QStash Event Stream History
-app.get('/api/events/history', (_req, res) => {
-  res.json({ success: true, data: getQStashAuditHistory() });
+// Real Supabase Event Stream History
+app.get('/api/events/history', async (_req, res) => {
+  try {
+    const db = getDb();
+    const { data: outbox } = await db
+      .from('outbox_events')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    const { data: processed } = await db
+      .from('processed_events')
+      .select('*')
+      .order('processed_at', { ascending: false })
+      .limit(30);
+
+    return res.json({
+      success: true,
+      data: {
+        outbox: outbox || [],
+        processed: processed || [],
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Serverless Architecture Health & Diagnostic Endpoint
@@ -66,7 +94,7 @@ app.get('/api/system/health', async (_req, res) => {
   const qstashConfigured = isQStashConfigured();
   const receiverConfigured = isQStashReceiverConfigured();
 
-  res.json({
+  return res.json({
     status: 'UP',
     platform: 'SmartRestaurant Serverless Architecture (Vercel Hobby + Supabase + QStash)',
     marketsSupported: ['es-CO', 'es-MX', 'en-US', 'pt-BR', 'ja-JP'],
@@ -92,7 +120,7 @@ app.get('/api/system/health', async (_req, res) => {
       targetEndpoint: '/api/events/qstash-receiver',
       mode: 'Serverless HTTP Webhook Delivery with Signature Verification',
     },
-    transactionalOutbox: 'Active (PostgreSQL outbox_events table with QStash dispatcher)',
+    transactionalOutbox: 'Active (Supabase outbox_events table with QStash dispatcher)',
     timestamp: new Date().toISOString(),
   });
 });

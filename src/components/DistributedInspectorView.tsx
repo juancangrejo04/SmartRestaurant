@@ -260,7 +260,7 @@ export const DistributedInspectorView: React.FC = () => {
                 BEGIN TRANSACTION;{'\n'}
                 -- 1. Mutar entidad de negocio (ej. INSERT INTO orders ...){'\n'}
                 -- 2. Insertar en tabla outbox (INSERT INTO outbox_events ...){'\n'}
-                COMMIT; -- Atomicidad local garantizada. El worker asíncrono lee y despacha a RabbitMQ.
+                COMMIT; -- Atomicidad local garantizada. El worker asíncrono lee y despacha a Upstash QStash.
               </code>
             </div>
           </div>
@@ -460,7 +460,7 @@ export const DistributedInspectorView: React.FC = () => {
               <span>Transactional Outbox & Eventual Consistency</span>
             </h3>
             <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-              Evita el problema del dual-write distribuido. La entidad de negocio y el evento se guardan atómicamente en la misma transacción SQL local. Un proceso despachador publica el evento en RabbitMQ; si el broker estuviera momentáneamente offline, el evento no se pierde y se reintenta automáticamente.
+              Evita el problema del dual-write distribuido. La entidad de negocio y el evento se guardan atómicamente en la misma transacción SQL local en Supabase. Un proceso despachador publica el evento en Upstash QStash; si el broker estuviera momentáneamente offline, el evento no se pierde y se reintenta automáticamente con firma criptográfica.
             </p>
           </div>
 

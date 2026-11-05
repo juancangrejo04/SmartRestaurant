@@ -310,7 +310,7 @@ export const ptBR: TranslationDictionary = {
   architecture: {
     title: 'Inspeção de Arquitetura e Padrões Distribuídos',
     subtitle: 'Monitoramento ao vivo de eventos Outbox, correlações e resiliência.',
-    eventBusTitle: 'Event Bus RabbitMQ (Simulado em Memória)',
+    eventBusTitle: 'Event Bus Upstash QStash (Serverless)',
     outboxTitle: 'Padrão Transactional Outbox',
     correlationIdTitle: 'Rastreabilidade com Correlation-ID',
     servicesHealthTitle: 'Status dos Microsserviços',

@@ -1,14 +1,9 @@
 // Local Development Server & Vercel Parity Server
 import { createServer as createViteServer } from 'vite';
 import { app } from './api/index';
-import { dispatchPendingOutboxToQStash } from './services/common/qstash';
+import { dispatchPendingOutboxEvents } from './services/common/outbox';
 
 async function startLocalServer() {
-  // Start periodic outbox dispatcher in development (every 5 seconds)
-  setInterval(() => {
-    dispatchPendingOutboxToQStash(10).catch(() => {});
-  }, 5000);
-
   // Mount Vite SPA in Development or Serve Static in Production
   const isProd = process.env.NODE_ENV === 'production';
   if (!isProd) {

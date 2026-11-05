@@ -25,7 +25,7 @@ async function launch() {
   console.log('=================================================================\n');
 
   // 1. Run PostgreSQL Migrations
-  await runMigrations().catch((err) => console.warn('[Migration Runner Notice]:', err.message));
+  await runMigrations().catch((err: any) => console.warn('[Migration Runner Notice]:', err?.message));
 
   // 2. Start Background Transactional Outbox Worker
   startOutboxWorker(2000);
@@ -41,6 +41,6 @@ async function launch() {
   console.log('\n[Distributed Cluster Ready]: 7 microservices active.');
 }
 
-launch().catch((err) => {
+launch().catch((err: any) => {
   console.error('[Distributed Cluster Fatal]:', err);
 });
