@@ -1,10 +1,7 @@
-// JWT Authentication, Bcrypt Password Hashing, and RBAC Security Middleware
+// Supabase Auth Integration & RBAC Security Middleware
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
 import { UserRole } from '../../src/types';
-
-export const JWT_SECRET = process.env.JWT_SECRET || 'sr_super_secret_jwt_key_dist_2026';
+import { getDb } from './db';
 
 export interface UserTokenPayload {
   id: string;
@@ -20,104 +17,136 @@ export interface AuthenticatedRequest extends Request {
 }
 
 /**
- * Sign a valid JWT with role claims and expiration
+ * Middleware: Enforces verified Supabase Auth session via Bearer Token.
+ * Queries Supabase Auth directly via db.auth.getUser(token) and retrieves the
+ * verified profile from the `users` table.
+ *
+ * CRITICAL SECURITY: Never trusts client-sent identity headers (e.g. x-user-role or x-user-id).
  */
-export function generateToken(payload: UserTokenPayload, expiresIn: string | number = '12h'): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn } as jwt.SignOptions);
-}
-
-/**
- * Verify JWT signature and extract payload
- */
-export function verifyToken(token: string): UserTokenPayload {
-  return jwt.verify(token, JWT_SECRET) as UserTokenPayload;
-}
-
-/**
- * Hash password with bcrypt salt rounds
- */
-export async function hashPassword(plainText: string): Promise<string> {
-  return bcrypt.hash(plainText, 10);
-}
-
-/**
- * Compare plain text password against stored bcrypt hash
- */
-export async function comparePassword(plainText: string, hashed: string): Promise<boolean> {
-  return bcrypt.compare(plainText, hashed);
-}
-
-/**
- * Middleware: Enforces valid Bearer JWT on protected endpoints
- */
-export function authenticateJWT(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+export async function authenticateJWT(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   const authHeader = req.headers['authorization'];
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
+    res.status(401).json({
       success: false,
       error: { code: 'UNAUTHORIZED', message: 'Missing or malformed Authorization header with Bearer token' },
     });
+    return;
   }
 
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = verifyToken(token);
-    req.user = decoded;
+    const db = getDb();
+
+    // 1. Validate session cryptographically via Supabase Auth
+    const { data: authData, error: authError } = await db.auth.getUser(token);
+
+    if (authError || !authData?.user) {
+      res.status(401).json({
+        success: false,
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Supabase session token is invalid or expired.',
+          details: authError?.message,
+        },
+      });
+      return;
+    }
+
+    const authUser = authData.user;
+
+    // 2. Fetch associated business profile from users table
+    const { data: profile } = await db
+      .from('users')
+      .select('id, tenant_id, name, email, role, assigned_branch_id')
+      .eq('id', authUser.id)
+      .maybeSingle();
+
+    const role = (profile?.role || authUser.user_metadata?.role || 'CUSTOMER') as UserRole;
+    const tenantId = (profile?.tenant_id || authUser.user_metadata?.tenantId || 'rest-col-01') as string;
+    const name = profile?.name || authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'Usuario';
+    const assignedBranchId = profile?.assigned_branch_id || authUser.user_metadata?.assignedBranchId;
+
+    // 3. Attach authenticated, tamper-proof identity to request
+    req.user = {
+      id: authUser.id,
+      tenantId,
+      email: authUser.email || '',
+      role,
+      name,
+      assignedBranchId,
+    };
+
     next();
   } catch (err: any) {
-    return res.status(401).json({
+    res.status(500).json({
       success: false,
-      error: { code: 'INVALID_TOKEN', message: 'Token is invalid or expired', details: err.message },
+      error: { code: 'AUTH_VERIFICATION_FAILED', message: err.message },
     });
   }
 }
 
 /**
- * Middleware: Enforces Role-Based Access Control (RBAC) in the backend
+ * Middleware: Enforces Role-Based Access Control (RBAC) in the backend based strictly
+ * on the verified Supabase Auth user.
  */
 export function requireRole(allowedRoles: UserRole[]) {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    // 1. Check verified JWT user
-    if (req.user) {
-      if (allowedRoles.includes(req.user.role)) {
-        return next();
-      }
-      return res.status(403).json({
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required for role verification.' },
+      });
+      return;
+    }
+
+    if (!allowedRoles.includes(req.user.role)) {
+      res.status(403).json({
         success: false,
         error: {
           code: 'FORBIDDEN',
-          message: `Role ${req.user.role} does not have permission to access this resource.`,
+          message: `Role '${req.user.role}' is not authorized to perform this operation.`,
           allowedRoles,
         },
       });
+      return;
     }
 
-    // 2. Fallback for backwards-compatibility only if authenticated
-    return res.status(401).json({
-      success: false,
-      error: { code: 'UNAUTHORIZED', message: 'Authentication required for role verification.' },
-    });
+    next();
   };
 }
 
 /**
- * Middleware: Enforces Tenant Isolation
+ * Middleware: Enforces Strict Multi-Tenant Isolation
+ * Ensures users cannot read or mutate data belonging to a different tenant.
  */
-export function requireTenantIsolation(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+export function requireTenantIsolation(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
   if (!req.user) {
-    return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Auth required' } });
+    res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    return;
   }
 
-  const targetTenantId = (req.params.tenantId || req.body.tenantId || req.query.tenantId) as string;
+  const targetTenantId = (req.params.tenantId || req.body?.tenantId || req.query?.tenantId) as string;
 
-  // OWNER can inspect cross-tenant in multi-chain, otherwise user must match tenant
+  // Only global OWNER can inspect across tenants; all others are strictly bound to their tenant
   if (targetTenantId && req.user.role !== 'OWNER' && req.user.tenantId !== targetTenantId) {
-    return res.status(403).json({
+    res.status(403).json({
       success: false,
-      error: { code: 'TENANT_MISMATCH', message: 'Access denied to data from different tenant organization.' },
+      error: {
+        code: 'TENANT_MISMATCH',
+        message: `Cross-tenant access forbidden. User from '${req.user.tenantId}' cannot access '${targetTenantId}'.`,
+      },
     });
+    return;
   }
 
   next();

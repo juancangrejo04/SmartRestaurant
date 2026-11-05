@@ -4,6 +4,7 @@ import cors from 'cors';
 import { getDb } from '../common/db';
 import { stageOutboxEvent } from '../common/outbox';
 import { publishToQStash } from '../common/qstash';
+import { authenticateJWT, AuthenticatedRequest } from '../common/auth';
 import { OrderStatus, UserRole } from '../../src/types';
 
 export const kitchenApp = express();
@@ -102,12 +103,13 @@ kitchenApp.get('/queue', async (req: Request, res: Response) => {
  * RECEIVED -> PREPARING -> READY -> DELIVERED
  * Enforced strictly against current order status in Supabase
  */
-kitchenApp.patch('/orders/:id/status', async (req: Request, res: Response) => {
+kitchenApp.patch('/orders/:id/status', authenticateJWT, async (req: AuthenticatedRequest, res: Response) => {
   const correlationId = (res.getHeader('X-Correlation-Id') as string) || `kds-${Date.now()}`;
 
   try {
     const { status, note } = req.body;
-    const userRole = (req.headers['x-user-role'] as UserRole) || 'KITCHEN';
+    const userRole = (req.user?.role || 'KITCHEN') as UserRole;
+    const userTenantId = req.user?.tenantId;
     const db = getDb();
 
     // 1. Fetch current order from Supabase
@@ -122,10 +124,36 @@ kitchenApp.patch('/orders/:id/status', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } });
     }
 
+    // 2. Strict Tenant Isolation Check: Colombian staff cannot mutate Japanese orders
+    if (userTenantId && req.user?.role !== 'OWNER' && currentOrder.tenant_id !== userTenantId) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'TENANT_MISMATCH',
+          message: `Forbidden: User from tenant '${userTenantId}' cannot modify order belonging to tenant '${currentOrder.tenant_id}'.`,
+        },
+      });
+    }
+
     const currentStatus = currentOrder.status as OrderStatus;
     const nextStatus = status as OrderStatus;
 
-    // 2. Validate Finite State Machine sequence
+    // 3. Role Authorization based on nextStatus
+    if ((nextStatus === 'PREPARING' || nextStatus === 'READY') && !['KITCHEN', 'ADMIN', 'OWNER'].includes(userRole)) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ROLE_FORBIDDEN', message: `Role '${userRole}' cannot mark orders as ${nextStatus}.` },
+      });
+    }
+
+    if (nextStatus === 'DELIVERED' && !['WAITER', 'ADMIN', 'OWNER'].includes(userRole)) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ROLE_FORBIDDEN', message: `Role '${userRole}' cannot mark orders as DELIVERED.` },
+      });
+    }
+
+    // 4. Validate Finite State Machine sequence
     const validTransitions: Record<string, string[]> = {
       RECEIVED: ['PREPARING', 'CANCELLED'],
       PREPARING: ['READY', 'CANCELLED'],

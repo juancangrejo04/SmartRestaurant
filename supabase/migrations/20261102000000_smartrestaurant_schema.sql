@@ -1,6 +1,7 @@
 -- ============================================================
 -- SmartRestaurant — Esquema Completo para Supabase (PostgreSQL 15+)
 -- Migración Versionada: 20261102000000_smartrestaurant_schema.sql
+-- Arquitectura: Vercel Serverless + Supabase PostgreSQL & Auth + Upstash QStash
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -32,14 +33,15 @@ CREATE TABLE IF NOT EXISTS branches (
 
 CREATE INDEX IF NOT EXISTS idx_branches_tenant ON branches(tenant_id);
 
--- 3. Usuarios y Roles (RBAC con Supabase Auth integration)
+-- 3. Perfiles de Usuario y Roles (Vinculado a auth.users de Supabase Auth)
+-- NOTA: Las contraseñas residen exclusivamente en auth.users gestionadas por Supabase Auth.
+-- Esta tabla almacena el perfil de negocio, tenant asignado y rol RBAC.
 CREATE TABLE IF NOT EXISTS users (
-    id VARCHAR(64) PRIMARY KEY,
+    id VARCHAR(64) PRIMARY KEY, -- Coincide con auth.uid() de Supabase Auth
     tenant_id VARCHAR(64) NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
     role VARCHAR(32) NOT NULL, -- OWNER, ADMIN, WAITER, KITCHEN, CUSTOMER
-    password_hash VARCHAR(255),
     assigned_branch_id VARCHAR(64) REFERENCES branches(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -225,8 +227,26 @@ CREATE TABLE IF NOT EXISTS processed_events (
 );
 
 -- ============================================================
+-- Funciones Auxiliares para Políticas RLS y Aislamiento Multi-Tenant
+-- ============================================================
+CREATE OR REPLACE FUNCTION current_user_tenant_id()
+RETURNS VARCHAR(64) AS $$
+  SELECT tenant_id FROM users WHERE id::text = auth.uid()::text LIMIT 1;
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION current_user_role()
+RETURNS VARCHAR(32) AS $$
+  SELECT role FROM users WHERE id::text = auth.uid()::text LIMIT 1;
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION current_user_branch_id()
+RETURNS VARCHAR(64) AS $$
+  SELECT assigned_branch_id FROM users WHERE id::text = auth.uid()::text LIMIT 1;
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+-- ============================================================
 -- Row Level Security (RLS) en Supabase
--- (Sintaxis estándar y válida de PostgreSQL sin errores)
+-- Aislamiento estricto por tenant_id y roles RBAC
 -- ============================================================
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE branches ENABLE ROW LEVEL SECURITY;
@@ -242,21 +262,41 @@ ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE processed_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
--- Catálogos públicos de sólo lectura para comensales que escanean el QR
+-- Catálogos públicos de sólo lectura para comensales que consultan menús y sedes
 DROP POLICY IF EXISTS "Public Read Tenants" ON tenants;
 CREATE POLICY "Public Read Tenants" ON tenants FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Admin Manage Tenants" ON tenants;
+CREATE POLICY "Admin Manage Tenants" ON tenants FOR ALL
+USING (auth.role() = 'service_role' OR (current_user_role() = 'OWNER' AND id = current_user_tenant_id()));
 
 DROP POLICY IF EXISTS "Public Read Branches" ON branches;
 CREATE POLICY "Public Read Branches" ON branches FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Admin Manage Branches" ON branches;
+CREATE POLICY "Admin Manage Branches" ON branches FOR ALL
+USING (auth.role() = 'service_role' OR (current_user_role() IN ('OWNER', 'ADMIN') AND tenant_id = current_user_tenant_id()));
+
 DROP POLICY IF EXISTS "Public Read Tables" ON restaurant_tables;
 CREATE POLICY "Public Read Tables" ON restaurant_tables FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Admin Manage Tables" ON restaurant_tables;
+CREATE POLICY "Admin Manage Tables" ON restaurant_tables FOR ALL
+USING (auth.role() = 'service_role' OR (current_user_role() IN ('OWNER', 'ADMIN') AND tenant_id = current_user_tenant_id()));
 
 DROP POLICY IF EXISTS "Public Read Menu Categories" ON menu_categories;
 CREATE POLICY "Public Read Menu Categories" ON menu_categories FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Admin Manage Menu Categories" ON menu_categories;
+CREATE POLICY "Admin Manage Menu Categories" ON menu_categories FOR ALL
+USING (auth.role() = 'service_role' OR (current_user_role() IN ('OWNER', 'ADMIN') AND tenant_id = current_user_tenant_id()));
+
 DROP POLICY IF EXISTS "Public Read Menu Items" ON menu_items;
 CREATE POLICY "Public Read Menu Items" ON menu_items FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Admin Manage Menu Items" ON menu_items;
+CREATE POLICY "Admin Manage Menu Items" ON menu_items FOR ALL
+USING (auth.role() = 'service_role' OR (current_user_role() IN ('OWNER', 'ADMIN') AND tenant_id = current_user_tenant_id()));
 
 DROP POLICY IF EXISTS "Public Read Reviews" ON reviews;
 CREATE POLICY "Public Read Reviews" ON reviews FOR SELECT USING (true);
@@ -264,33 +304,84 @@ CREATE POLICY "Public Read Reviews" ON reviews FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Public Insert Reviews" ON reviews;
 CREATE POLICY "Public Insert Reviews" ON reviews FOR INSERT WITH CHECK (true);
 
--- Políticas protegidas: solo usuarios autenticados con rol o peticiones firmadas (Service Role)
-DROP POLICY IF EXISTS "Orders Tenant Isolation" ON orders;
-CREATE POLICY "Orders Tenant Isolation" ON orders FOR ALL 
-USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+-- Aislamiento Multi-Tenant Estricto para Pedidos (Orders)
+-- Un usuario autenticado de Colombia NO puede leer ni modificar pedidos de Japón
+DROP POLICY IF EXISTS "Orders Tenant Isolation Read" ON orders;
+CREATE POLICY "Orders Tenant Isolation Read" ON orders FOR SELECT
+USING (
+    auth.role() = 'service_role' OR
+    (current_user_tenant_id() IS NOT NULL AND tenant_id = current_user_tenant_id())
+);
 
-DROP POLICY IF EXISTS "Order Items Tenant Isolation" ON order_items;
-CREATE POLICY "Order Items Tenant Isolation" ON order_items FOR ALL 
-USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+DROP POLICY IF EXISTS "Orders Tenant Insert" ON orders;
+CREATE POLICY "Orders Tenant Insert" ON orders FOR INSERT
+WITH CHECK (
+    auth.role() = 'service_role' OR
+    (auth.role() = 'anon') OR
+    (current_user_tenant_id() IS NOT NULL AND tenant_id = current_user_tenant_id())
+);
 
-DROP POLICY IF EXISTS "Reservations Tenant Isolation" ON reservations;
-CREATE POLICY "Reservations Tenant Isolation" ON reservations FOR ALL 
-USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+DROP POLICY IF EXISTS "Orders Tenant Isolation Mutate" ON orders;
+CREATE POLICY "Orders Tenant Isolation Mutate" ON orders FOR UPDATE
+USING (
+    auth.role() = 'service_role' OR
+    (current_user_tenant_id() IS NOT NULL AND tenant_id = current_user_tenant_id())
+);
 
+-- Aislamiento para Ítems de Pedidos
+DROP POLICY IF EXISTS "Order Items Tenant Isolation Read" ON order_items;
+CREATE POLICY "Order Items Tenant Isolation Read" ON order_items FOR SELECT
+USING (
+    auth.role() = 'service_role' OR
+    EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND orders.tenant_id = current_user_tenant_id())
+);
+
+DROP POLICY IF EXISTS "Order Items Insert" ON order_items;
+CREATE POLICY "Order Items Insert" ON order_items FOR INSERT WITH CHECK (true);
+
+-- Aislamiento Multi-Tenant Estricto para Reservas
+DROP POLICY IF EXISTS "Reservations Tenant Isolation Read" ON reservations;
+CREATE POLICY "Reservations Tenant Isolation Read" ON reservations FOR SELECT
+USING (
+    auth.role() = 'service_role' OR
+    (current_user_tenant_id() IS NOT NULL AND tenant_id = current_user_tenant_id()) OR
+    (auth.jwt()->>'email' IS NOT NULL AND customer_email = auth.jwt()->>'email')
+);
+
+DROP POLICY IF EXISTS "Reservations Public Insert" ON reservations;
+CREATE POLICY "Reservations Public Insert" ON reservations FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Reservations Tenant Isolation Mutate" ON reservations;
+CREATE POLICY "Reservations Tenant Isolation Mutate" ON reservations FOR UPDATE
+USING (
+    auth.role() = 'service_role' OR
+    (current_user_tenant_id() IS NOT NULL AND tenant_id = current_user_tenant_id())
+);
+
+-- Aislamiento de Usuarios y Perfiles
 DROP POLICY IF EXISTS "Users Tenant Isolation" ON users;
-CREATE POLICY "Users Tenant Isolation" ON users FOR ALL 
-USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+CREATE POLICY "Users Tenant Isolation" ON users FOR ALL
+USING (
+    auth.role() = 'service_role' OR
+    id::text = auth.uid()::text OR
+    (current_user_tenant_id() IS NOT NULL AND tenant_id = current_user_tenant_id() AND current_user_role() IN ('OWNER', 'ADMIN'))
+);
 
+-- Aislamiento de Notificaciones In-App
 DROP POLICY IF EXISTS "Notifications Tenant Isolation" ON notifications;
-CREATE POLICY "Notifications Tenant Isolation" ON notifications FOR ALL 
-USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+CREATE POLICY "Notifications Tenant Isolation" ON notifications FOR ALL
+USING (
+    auth.role() = 'service_role' OR
+    (current_user_tenant_id() IS NOT NULL AND tenant_id = current_user_tenant_id())
+);
 
+-- Outbox & Processed Events (Solo accesibles mediante Service Role del Backend / Serverless)
 DROP POLICY IF EXISTS "Outbox Backend Only" ON outbox_events;
-CREATE POLICY "Outbox Backend Only" ON outbox_events FOR ALL 
+CREATE POLICY "Outbox Backend Only" ON outbox_events FOR ALL
 USING (auth.role() = 'service_role');
 
 DROP POLICY IF EXISTS "Processed Events Backend Only" ON processed_events;
-CREATE POLICY "Processed Events Backend Only" ON processed_events FOR ALL 
+CREATE POLICY "Processed Events Backend Only" ON processed_events FOR ALL
 USING (auth.role() = 'service_role');
 
 -- ============================================================
@@ -315,4 +406,14 @@ INSERT INTO branches (id, tenant_id, name, address, city, country, timezone, com
     ('branch-bra-rio', 'rest-bra-04', 'Sede Rio de Janeiro - Ipanema', 'Rua Prudente de Morais 1120', 'Rio de Janeiro', 'Brasil', 'America/Sao_Paulo', 'BRL', '12:00', '23:30', 115),
     ('branch-jpn-tok', 'rest-jpn-05', 'Sede Tokyo - Ginza', 'Ginza 6-10-1, Chuo-ku', 'Tokyo', 'Japan', 'Asia/Tokyo', 'JPY', '11:00', '22:00', 60),
     ('branch-jpn-kyo', 'rest-jpn-05', 'Sede Kyoto - Gion', 'Gionmachi Minamigawa 570', 'Kyoto', 'Japan', 'Asia/Tokyo', 'JPY', '11:30', '21:30', 50)
+ON CONFLICT (id) DO NOTHING;
+
+-- Perfiles de Demostración Semilla (Sin contraseñas; gestionados por Supabase Auth)
+INSERT INTO users (id, tenant_id, name, email, role, assigned_branch_id) VALUES
+    ('usr-owner-col', 'rest-col-01', 'Carlos Mendoza', 'carlos@smartrestaurant.co', 'OWNER', 'branch-col-bog'),
+    ('usr-admin-col', 'rest-col-01', 'Valeria Gómez', 'valeria.bogota@smartrestaurant.co', 'ADMIN', 'branch-col-bog'),
+    ('usr-waiter-col', 'rest-col-01', 'Santiago Rivas', 'santiago.mesero@smartrestaurant.co', 'WAITER', 'branch-col-bog'),
+    ('usr-kitchen-col', 'rest-col-01', 'Chef Álvaro Morales', 'cocina.bogota@smartrestaurant.co', 'KITCHEN', 'branch-col-bog'),
+    ('usr-admin-jpn', 'rest-jpn-05', 'Kenji Takahashi (高橋 健二)', 'kenji.tokyo@smartrestaurant.jp', 'ADMIN', 'branch-jpn-tok'),
+    ('usr-kitchen-jpn', 'rest-jpn-05', 'Chef Ryu Tanaka (田中 隆)', 'ryu.tokyo@smartrestaurant.jp', 'KITCHEN', 'branch-jpn-tok')
 ON CONFLICT (id) DO NOTHING;

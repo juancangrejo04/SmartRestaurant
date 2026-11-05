@@ -9,8 +9,40 @@
       "destination": "/api/events/qstash-receiver"
     },
     {
-      "source": "/api/(.*)",
-      "destination": "/api"
+      "source": "/api/events/dispatch-outbox",
+      "destination": "/api/events/dispatch-outbox"
+    },
+    {
+      "source": "/api/events/history",
+      "destination": "/api/events/history"
+    },
+    {
+      "source": "/api/auth/(.*)",
+      "destination": "/api/auth/[...route]"
+    },
+    {
+      "source": "/api/restaurants/(.*)",
+      "destination": "/api/restaurants/[...route]"
+    },
+    {
+      "source": "/api/reservations/(.*)",
+      "destination": "/api/reservations/[...route]"
+    },
+    {
+      "source": "/api/orders/(.*)",
+      "destination": "/api/orders/[...route]"
+    },
+    {
+      "source": "/api/kitchen/(.*)",
+      "destination": "/api/kitchen/[...route]"
+    },
+    {
+      "source": "/api/notifications/(.*)",
+      "destination": "/api/notifications/[...route]"
+    },
+    {
+      "source": "/api/analytics/(.*)",
+      "destination": "/api/analytics/[...route]"
     },
     {
       "source": "/(.*)",

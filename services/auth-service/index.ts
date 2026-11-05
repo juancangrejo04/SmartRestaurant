@@ -1,8 +1,8 @@
-// Auth Service — Production Authentication, Registration, Password Recovery, and RBAC with Supabase
+// Auth Service — Production Authentication, Registration, Password Recovery, and RBAC via Supabase Auth
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { getDb } from '../common/db';
-import { comparePassword, hashPassword, generateToken, authenticateJWT, requireRole } from '../common/auth';
+import { authenticateJWT, requireRole, AuthenticatedRequest } from '../common/auth';
 import { UserRole } from '../../src/types';
 
 export const authApp = express();
@@ -23,15 +23,16 @@ authApp.get('/health', (_req: Request, res: Response) => {
   res.json({
     service: 'auth-service',
     status: 'UP',
-    provider: 'Supabase PostgreSQL & Auth',
-    security: 'JWT + Bcrypt (Cost 10) + RBAC + Tenant Isolation',
+    provider: 'Supabase Auth (Native OAuth/JWT) & PostgreSQL',
+    security: 'Supabase Auth Sessions + RBAC + Tenant Isolation',
     timestamp: new Date().toISOString(),
   });
 });
 
 /**
- * User Login with Real Supabase Verification & Bcrypt Password Validation.
- * No demo bypasses, no role-only logins, and no plaintext fallbacks.
+ * User Login with Supabase Auth (signInWithPassword).
+ * Validates credentials directly against Supabase Auth.
+ * No custom password hashes in public tables.
  */
 authApp.post('/login', async (req: Request, res: Response) => {
   try {
@@ -44,61 +45,52 @@ authApp.post('/login', async (req: Request, res: Response) => {
       });
     }
 
-    const db = getDb();
     const cleanEmail = email.toLowerCase().trim();
+    const db = getDb();
 
-    // 1. Fetch user from Supabase users table
-    const { data: userRow, error: fetchError } = await db
+    // 1. Authenticate against Supabase Auth
+    const { data: authData, error: authError } = await db.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
+
+    if (authError || !authData.user || !authData.session) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: 'UNAUTHORIZED',
+          message: authError?.message || 'Invalid email or password.',
+        },
+      });
+    }
+
+    const authUser = authData.user;
+
+    // 2. Query business profile from users table
+    const { data: profile } = await db
       .from('users')
-      .select('id, tenant_id, name, email, role, password_hash, assigned_branch_id')
-      .eq('email', cleanEmail)
+      .select('id, tenant_id, name, email, role, assigned_branch_id')
+      .eq('id', authUser.id)
       .maybeSingle();
 
-    if (fetchError) {
-      return res.status(500).json({
-        success: false,
-        error: { code: 'DATABASE_ERROR', message: fetchError.message },
-      });
-    }
-
-    if (!userRow || !userRow.password_hash) {
-      return res.status(401).json({
-        success: false,
-        error: { code: 'UNAUTHORIZED', message: 'Invalid email or password.' },
-      });
-    }
-
-    // 2. Strict Bcrypt Password Comparison (No bypasses)
-    const isValid = await comparePassword(password, userRow.password_hash);
-    if (!isValid) {
-      return res.status(401).json({
-        success: false,
-        error: { code: 'UNAUTHORIZED', message: 'Invalid email or password.' },
-      });
-    }
-
-    // 3. Issue Signed JWT with Claims (Tenant ID and Role)
-    const token = generateToken({
-      id: userRow.id,
-      tenantId: userRow.tenant_id,
-      name: userRow.name,
-      email: userRow.email,
-      role: userRow.role as UserRole,
-      assignedBranchId: userRow.assigned_branch_id,
-    });
+    const userRole = (profile?.role || authUser.user_metadata?.role || 'CUSTOMER') as UserRole;
+    const tenantId = (profile?.tenant_id || authUser.user_metadata?.tenantId || 'rest-col-01') as string;
+    const name = profile?.name || authUser.user_metadata?.name || cleanEmail.split('@')[0];
+    const assignedBranchId = profile?.assigned_branch_id || authUser.user_metadata?.assignedBranchId;
 
     return res.json({
       success: true,
-      token,
+      token: authData.session.access_token,
+      refreshToken: authData.session.refresh_token,
+      expiresIn: authData.session.expires_in,
       user: {
-        id: userRow.id,
-        tenantId: userRow.tenant_id,
-        name: userRow.name,
-        email: userRow.email,
-        role: userRow.role,
-        assignedBranchId: userRow.assigned_branch_id,
+        id: authUser.id,
+        tenantId,
+        name,
+        email: cleanEmail,
+        role: userRole,
+        assignedBranchId,
       },
-      expiresIn: '12h',
       correlationId: res.getHeader('X-Correlation-Id'),
     });
   } catch (err: any) {
@@ -110,7 +102,8 @@ authApp.post('/login', async (req: Request, res: Response) => {
 });
 
 /**
- * User Registration with Supabase Persistence
+ * User Registration with Supabase Auth (signUp).
+ * Creates identity in auth.users and profile in users table.
  */
 authApp.post('/register', async (req: Request, res: Response) => {
   try {
@@ -126,54 +119,62 @@ authApp.post('/register', async (req: Request, res: Response) => {
     const cleanEmail = email.toLowerCase().trim();
     const db = getDb();
 
-    // Check if email already exists
-    const { data: existingUser } = await db
-      .from('users')
-      .select('id')
-      .eq('email', cleanEmail)
-      .maybeSingle();
+    // 1. Register with Supabase Auth
+    const { data: authData, error: authError } = await db.auth.signUp({
+      email: cleanEmail,
+      password,
+      options: {
+        data: {
+          name,
+          role,
+          tenantId,
+          assignedBranchId: branchId || null,
+        },
+      },
+    });
 
-    if (existingUser) {
-      return res.status(409).json({
+    if (authError) {
+      return res.status(400).json({
         success: false,
-        error: { code: 'USER_EXISTS', message: 'An account with this email already exists.' },
+        error: { code: 'REGISTRATION_FAILED', message: authError.message },
       });
     }
 
-    const passwordHash = await hashPassword(password);
-    const userId = `usr-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    const authUser = authData.user;
+    if (!authUser) {
+      return res.status(500).json({
+        success: false,
+        error: { code: 'REGISTRATION_ERROR', message: 'User was not created by Supabase Auth.' },
+      });
+    }
 
-    const { error: insertError } = await db.from('users').insert({
-      id: userId,
+    // 2. Create business profile in users table (without storing password)
+    const { error: profileError } = await db.from('users').upsert({
+      id: authUser.id,
       tenant_id: tenantId,
       name,
       email: cleanEmail,
       role,
-      password_hash: passwordHash,
       assigned_branch_id: branchId || null,
       created_at: new Date().toISOString(),
     });
 
-    if (insertError) {
-      return res.status(500).json({
-        success: false,
-        error: { code: 'REGISTRATION_FAILED', message: insertError.message },
-      });
+    if (profileError) {
+      console.warn('[Profile Sync Notice]:', profileError.message);
     }
-
-    const token = generateToken({
-      id: userId,
-      tenantId,
-      name,
-      email: cleanEmail,
-      role: role as UserRole,
-      assignedBranchId: branchId,
-    });
 
     return res.status(201).json({
       success: true,
-      token,
-      user: { id: userId, tenantId, name, email: cleanEmail, role, assignedBranchId: branchId },
+      user: {
+        id: authUser.id,
+        tenantId,
+        name,
+        email: cleanEmail,
+        role: role as UserRole,
+        assignedBranchId: branchId || null,
+      },
+      token: authData.session?.access_token || null,
+      message: 'Account registered successfully with Supabase Auth.',
     });
   } catch (err: any) {
     return res.status(500).json({
@@ -184,7 +185,7 @@ authApp.post('/register', async (req: Request, res: Response) => {
 });
 
 /**
- * Password Recovery via Supabase Auth
+ * Password Recovery via Supabase Auth (resetPasswordForEmail)
  */
 authApp.post('/recover-password', async (req: Request, res: Response) => {
   try {
@@ -196,23 +197,20 @@ authApp.post('/recover-password', async (req: Request, res: Response) => {
       });
     }
 
-    const db = getDb();
     const cleanEmail = email.toLowerCase().trim();
+    const db = getDb();
 
-    // Check user existence
-    const { data: user } = await db.from('users').select('id').eq('email', cleanEmail).maybeSingle();
-    if (!user) {
-      return res.status(404).json({
+    const { error } = await db.auth.resetPasswordForEmail(cleanEmail);
+    if (error) {
+      return res.status(400).json({
         success: false,
-        error: { code: 'USER_NOT_FOUND', message: 'No registered user found with the provided email.' },
+        error: { code: 'RECOVERY_FAILED', message: error.message },
       });
     }
 
-    await db.auth.resetPasswordForEmail(cleanEmail).catch(() => {});
-
     return res.json({
       success: true,
-      message: `If an account exists for ${cleanEmail}, a password recovery link has been dispatched securely.`,
+      message: `Password recovery link dispatched successfully via Supabase Auth to ${cleanEmail}.`,
     });
   } catch (err: any) {
     return res.status(500).json({
@@ -223,16 +221,29 @@ authApp.post('/recover-password', async (req: Request, res: Response) => {
 });
 
 /**
- * User Logout
+ * User Logout via Supabase Auth (signOut)
  */
-authApp.post('/logout', (_req: Request, res: Response) => {
-  return res.json({ success: true, message: 'Logged out successfully.' });
+authApp.post('/logout', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined;
+    const db = getDb();
+    if (token) {
+      await db.auth.signOut().catch(() => {});
+    }
+    return res.json({ success: true, message: 'Logged out successfully from Supabase Auth.' });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: { code: 'LOGOUT_ERROR', message: err.message },
+    });
+  }
 });
 
 /**
- * Profile verification endpoint
+ * Profile verification endpoint — Reads verified identity from Supabase Auth
  */
-authApp.get('/me', authenticateJWT, (req: any, res: Response) => {
+authApp.get('/me', authenticateJWT, (req: AuthenticatedRequest, res: Response) => {
   return res.json({ success: true, user: req.user });
 });
 

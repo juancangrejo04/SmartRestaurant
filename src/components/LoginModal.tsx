@@ -34,22 +34,31 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleManualLogin = (e: React.FormEvent) => {
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleManualLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    const result = store.loginStaff(email, password);
-    if (result.success && result.user) {
-      onLoginSuccess(result.user.role);
-      onClose();
-    } else {
-      setErrorMsg(result.error || t.login.invalidCredentials);
+    setIsLoading(true);
+    try {
+      const result = await store.loginStaff(email, password);
+      if (result.success && result.user) {
+        onLoginSuccess(result.user.role);
+        onClose();
+      } else {
+        setErrorMsg(result.error || t.login.invalidCredentials);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error de autenticación con Supabase Auth.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleQuickLogin = (account: StaffAccount) => {
-    store.loginStaff(account.email, account.password);
-    onLoginSuccess(account.role);
-    onClose();
+    setEmail(account.email);
+    setPassword('');
+    setErrorMsg(null);
   };
 
   return (

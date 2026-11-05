@@ -23,7 +23,6 @@ export interface StaffAccount {
   id: string;
   name: string;
   email: string;
-  password: string;
   role: UserRole;
   tenantId: string;
   avatarUrl?: string;
@@ -36,7 +35,6 @@ export const STAFF_ACCOUNTS: StaffAccount[] = [
     id: 'staff-owner-01',
     name: 'Carlos Mendoza',
     email: 'carlos@smartrestaurant.co',
-    password: 'propietario123',
     role: 'OWNER',
     tenantId: 'rest-col-01',
     jobTitle: 'Dueño y Fundador',
@@ -46,7 +44,6 @@ export const STAFF_ACCOUNTS: StaffAccount[] = [
     id: 'staff-admin-01',
     name: 'Valeria Gómez',
     email: 'valeria@smartrestaurant.co',
-    password: 'admin123',
     role: 'ADMIN',
     tenantId: 'rest-col-01',
     assignedBranchId: 'branch-col-bog',
@@ -57,7 +54,6 @@ export const STAFF_ACCOUNTS: StaffAccount[] = [
     id: 'staff-waiter-01',
     name: 'Mateo Restrepo',
     email: 'mateo@smartrestaurant.co',
-    password: 'mesero123',
     role: 'WAITER',
     tenantId: 'rest-col-01',
     assignedBranchId: 'branch-col-bog',
@@ -68,7 +64,6 @@ export const STAFF_ACCOUNTS: StaffAccount[] = [
     id: 'staff-kitchen-01',
     name: 'Chef Andrés Parra',
     email: 'cocina@smartrestaurant.co',
-    password: 'cocina123',
     role: 'KITCHEN',
     tenantId: 'rest-col-01',
     assignedBranchId: 'branch-col-bog',
@@ -1058,27 +1053,54 @@ class SmartRestaurantStore {
     return this.staffAccounts;
   }
 
-  public loginStaff(email: string, password: string): { success: boolean; user?: User; error?: string } {
-    const found = this.staffAccounts.find(
-      (acc) => acc.email.toLowerCase() === email.toLowerCase() && acc.password === password
-    );
+  private authToken: string | null = null;
 
-    if (!found) {
-      return { success: false, error: 'Credenciales inválidas. Verifica tu correo o contraseña.' };
+  public getAuthToken(): string | null {
+    if (!this.authToken && typeof window !== 'undefined') {
+      this.authToken = localStorage.getItem('sr_auth_token');
+    }
+    return this.authToken;
+  }
+
+  public async loginStaff(
+    email: string,
+    password: string
+  ): Promise<{ success: boolean; user?: User; token?: string; error?: string }> {
+    try {
+      if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          return {
+            success: false,
+            error: data.error?.message || 'Credenciales inválidas en Supabase Auth.',
+          };
+        }
+
+        this.currentUser = {
+          id: data.user.id,
+          tenantId: data.user.tenantId,
+          name: data.user.name,
+          email: data.user.email,
+          role: data.user.role,
+          assignedBranchId: data.user.assignedBranchId || this.activeBranchId,
+        };
+        this.isStaffLoggedIn = true;
+        this.authToken = data.token;
+        localStorage.setItem('sr_auth_token', data.token);
+        localStorage.setItem('sr_current_user', JSON.stringify(this.currentUser));
+        this.persist();
+        return { success: true, user: this.currentUser, token: data.token };
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message };
     }
 
-    this.currentUser = {
-      id: found.id,
-      tenantId: this.activeTenantId,
-      name: found.name,
-      email: found.email,
-      role: found.role,
-      avatarUrl: found.avatarUrl,
-      assignedBranchId: found.assignedBranchId || this.activeBranchId,
-    };
-    this.isStaffLoggedIn = true;
-    this.persist();
-    return { success: true, user: this.currentUser };
+    return { success: false, error: 'Autenticación con Supabase Auth requerida.' };
   }
 
   public quickStaffLogin(role: UserRole): User {
