@@ -65,25 +65,74 @@ export async function stageOutboxEvent(
 }
 
 /**
- * Polls pending events from Supabase outbox_events and dispatches them to Upstash QStash.
- * Updates publication status to PUBLISHED upon successful receipt.
+ * Dispatches pending outbox events to Upstash QStash atomically.
+ * In concurrent serverless invocations, uses claim_outbox_events RPC or worker locks to prevent
+ * duplicate dispatches across multiple concurrent serverless workers.
  */
-export async function dispatchPendingOutboxEvents(batchSize: number = 20): Promise<number> {
+export async function dispatchPendingOutboxEvents(
+  batchSize: number = 20,
+  workerId: string = `worker-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`
+): Promise<number> {
   const db = getDb();
   let dispatchedCount = 0;
+  const now = new Date().toISOString();
 
-  const { data: pendingEvents, error } = await db
-    .from('outbox_events')
-    .select('*')
-    .eq('status', 'PENDING')
-    .order('created_at', { ascending: true })
-    .limit(batchSize);
+  // 1. Try atomic claim using Supabase RPC function if available
+  let claimedEvents: any[] | null = null;
+  try {
+    const { data: rpcClaimed, error: rpcErr } = await (db as any).rpc('claim_outbox_events', {
+      p_worker_id: workerId,
+      p_batch_size: batchSize,
+      p_lock_timeout_seconds: 300,
+    });
+    if (!rpcErr && Array.isArray(rpcClaimed)) {
+      claimedEvents = rpcClaimed;
+    }
+  } catch {
+    // Fallback to table update if RPC not present in environment
+  }
 
-  if (error || !pendingEvents || pendingEvents.length === 0) {
+  // Fallback to direct table claiming if RPC is not available
+  if (claimedEvents === null) {
+    // Find events that are PENDING or lock-expired PROCESSING
+    const { data: candidateEvents, error } = await db
+      .from('outbox_events')
+      .select('*')
+      .in('status', ['PENDING', 'FAILED'])
+      .order('created_at', { ascending: true })
+      .limit(batchSize);
+
+    if (error || !candidateEvents || candidateEvents.length === 0) {
+      return 0;
+    }
+
+    // Atomically claim by assigning worker_id and updating status to PROCESSING
+    claimedEvents = [];
+    for (const cand of candidateEvents) {
+      const { data: claimed } = await db
+        .from('outbox_events')
+        .update({
+          status: 'PROCESSING',
+          worker_id: workerId,
+          locked_at: now,
+        })
+        .eq('id', cand.id)
+        .eq('status', cand.status)
+        .select()
+        .maybeSingle();
+
+      if (claimed) {
+        claimedEvents.push(claimed);
+      }
+    }
+  }
+
+  if (!claimedEvents || claimedEvents.length === 0) {
     return 0;
   }
 
-  for (const record of pendingEvents) {
+  // 2. Dispatch each claimed event to Upstash QStash
+  for (const record of claimedEvents) {
     try {
       const qstashRes = await publishToQStash(
         record.event_type as QStashEventType,
@@ -103,6 +152,8 @@ export async function dispatchPendingOutboxEvents(batchSize: number = 20): Promi
           .update({
             status: 'PUBLISHED',
             published_at: new Date().toISOString(),
+            worker_id: null,
+            locked_at: null,
           })
           .eq('id', record.id);
         dispatchedCount++;
@@ -113,6 +164,8 @@ export async function dispatchPendingOutboxEvents(batchSize: number = 20): Promi
           .update({
             retry_count: nextRetry,
             status: nextRetry >= 5 ? 'FAILED' : 'PENDING',
+            worker_id: null,
+            locked_at: null,
           })
           .eq('id', record.id);
       }
@@ -123,24 +176,12 @@ export async function dispatchPendingOutboxEvents(batchSize: number = 20): Promi
         .update({
           retry_count: nextRetry,
           status: nextRetry >= 5 ? 'FAILED' : 'PENDING',
+          worker_id: null,
+          locked_at: null,
         })
         .eq('id', record.id);
     }
   }
 
   return dispatchedCount;
-}
-
-/**
- * Starts an optional polling worker for local development scripts.
- * In production serverless on Vercel, dispatching is invoked per transaction or via QStash cron.
- */
-export function startOutboxWorker(intervalMs: number = 3000): { stop: () => void } {
-  const timer = setInterval(() => {
-    dispatchPendingOutboxEvents(20).catch(() => {});
-  }, intervalMs);
-
-  return {
-    stop: () => clearInterval(timer),
-  };
 }

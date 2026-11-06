@@ -7,7 +7,7 @@ import { kitchenApp } from './kitchen-service';
 import { notificationApp } from './notification-service';
 import { analyticsApp } from './analytics-service';
 import { runMigrations } from './common/db';
-import { startOutboxWorker } from './common/outbox';
+import { dispatchPendingOutboxEvents } from './common/outbox';
 
 const SERVICES = [
   { name: 'Auth Service', app: authApp, port: 4001 },
@@ -27,9 +27,9 @@ async function launch() {
   // 1. Run PostgreSQL Migrations
   await runMigrations().catch((err: any) => console.warn('[Migration Runner Notice]:', err?.message));
 
-  // 2. Start Background Transactional Outbox Worker
-  startOutboxWorker(2000);
-  console.log('[Transactional Outbox Worker]: Active (Polling pending events every 2000ms)');
+  // 2. Dispatch any pending Outbox events from startup
+  await dispatchPendingOutboxEvents(50).catch(() => {});
+  console.log('[Transactional Outbox]: Initial dispatch executed.');
 
   // 3. Start Each Microservice on its Dedicated Port
   for (const s of SERVICES) {

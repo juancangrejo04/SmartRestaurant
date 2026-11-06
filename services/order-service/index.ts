@@ -96,12 +96,12 @@ orderApp.post('/orders', async (req: Request, res: Response) => {
       });
     }
 
-    const { tenantId, branchId, tableId, qrToken, customerName, items } = req.body;
+    const { qrToken, customerName, items } = req.body;
 
-    if (!tenantId || !branchId || !tableId || !items || !Array.isArray(items) || items.length === 0) {
+    if (!qrToken || !items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         success: false,
-        error: { code: 'INVALID_ORDER', message: 'Order must contain tenantId, branchId, tableId, and items.' },
+        error: { code: 'INVALID_ORDER', message: 'Order must contain valid qrToken and at least one item.' },
       });
     }
 
@@ -130,17 +130,62 @@ orderApp.post('/orders', async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Fetch server prices from menu_items table
+    // 2. Validate QR token against restaurant_tables in Supabase
+    const { data: tableRecord, error: tableError } = await db
+      .from('restaurant_tables')
+      .select('*')
+      .eq('qr_token', qrToken)
+      .maybeSingle();
+
+    if (tableError) throw new Error(tableError.message);
+
+    if (!tableRecord) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_QR_TOKEN',
+          message: 'El código QR de la mesa es inválido o no existe en el sistema.',
+        },
+      });
+    }
+
+    // Securely derive tenant_id, branch_id, table_id, and table_number from DB
+    const verifiedTenantId = tableRecord.tenant_id;
+    const verifiedBranchId = tableRecord.branch_id;
+    const verifiedTableId = tableRecord.id;
+    const tableNumber = tableRecord.table_number || 1;
+
+    // 3. Fetch server prices and validate tenant isolation against menu_items table
     const itemIds = items.map((i: any) => i.menuItemId || i.id);
     const { data: dbMenuItems, error: itemsError } = await db
       .from('menu_items')
-      .select('id, name_translations, price, currency')
+      .select('id, tenant_id, name_translations, price, currency')
       .in('id', itemIds);
 
     if (itemsError) throw new Error(itemsError.message);
+
+    if (!dbMenuItems || dbMenuItems.length !== itemIds.length) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'ITEM_NOT_FOUND', message: 'Uno o más platos solicitados no existen en el catálogo.' },
+      });
+    }
+
+    // Cross-tenant item injection prevention
+    const crossTenantItem = dbMenuItems.find((m) => m.tenant_id !== verifiedTenantId);
+    if (crossTenantItem) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'CROSS_TENANT_ITEM_FORBIDDEN',
+          message: 'Violación de seguridad: El pedido contiene productos que no pertenecen al restaurante de la mesa.',
+        },
+      });
+    }
+
     const menuMap = new Map((dbMenuItems || []).map((m) => [m.id, m]));
 
-    // 3. Compute subtotal strictly on the server
+    // 4. Compute subtotal strictly on the server (overriding any client price)
     let subtotal = 0;
     const computedItems: any[] = [];
     let currency = 'COP';
@@ -148,16 +193,19 @@ orderApp.post('/orders', async (req: Request, res: Response) => {
     for (const it of items) {
       const targetId = it.menuItemId || it.id;
       const dbItem = menuMap.get(targetId);
+      if (!dbItem) continue;
+
       const qty = Math.max(1, Number(it.quantity) || 1);
-      const price = dbItem ? Number(dbItem.price) : Number(it.unitPrice || 10000);
+      // Strictly server-authoritative price from database
+      const price = Number(dbItem.price);
       const lineTotal = price * qty;
       subtotal += lineTotal;
-      if (dbItem?.currency) currency = dbItem.currency;
+      if (dbItem.currency) currency = dbItem.currency;
 
       computedItems.push({
         id: `oi-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         menu_item_id: targetId,
-        name: dbItem?.name_translations?.['es-CO'] || it.name || 'Plato',
+        name: dbItem.name_translations?.['es-CO'] || it.name || 'Plato',
         quantity: qty,
         unit_price: price,
         total_price: lineTotal,
@@ -165,7 +213,7 @@ orderApp.post('/orders', async (req: Request, res: Response) => {
       });
     }
 
-    // 4. Compute Tax based on Currency / Tenant
+    // 5. Compute Tax based on Currency / Tenant
     let taxRate = 0.08; // Colombia 8%
     if (currency === 'MXN') taxRate = 0.16;
     else if (currency === 'USD') taxRate = 0.08875;
@@ -175,14 +223,6 @@ orderApp.post('/orders', async (req: Request, res: Response) => {
     const tax = Math.round(subtotal * taxRate);
     const total = subtotal + tax;
 
-    // 5. Fetch Table Number
-    const { data: tableData } = await db
-      .from('restaurant_tables')
-      .select('table_number')
-      .eq('id', tableId)
-      .maybeSingle();
-
-    const tableNumber = tableData?.table_number || 1;
     const orderId = `ord-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const orderNumber = `ORD-${Date.now().toString(36).toUpperCase().substring(2, 7)}`;
 
@@ -191,9 +231,9 @@ orderApp.post('/orders', async (req: Request, res: Response) => {
       .from('orders')
       .insert({
         id: orderId,
-        tenant_id: tenantId,
-        branch_id: branchId,
-        table_id: tableId,
+        tenant_id: verifiedTenantId,
+        branch_id: verifiedBranchId,
+        table_id: verifiedTableId,
         table_number: tableNumber,
         order_number: orderNumber,
         customer_name: customerName || 'Comensal',
@@ -203,7 +243,7 @@ orderApp.post('/orders', async (req: Request, res: Response) => {
         total,
         currency,
         idempotency_key: idempotencyKey,
-        qr_token: qrToken || null,
+        qr_token: qrToken,
         correlation_id: correlationId,
         created_at: new Date().toISOString(),
       })
@@ -228,7 +268,7 @@ orderApp.post('/orders', async (req: Request, res: Response) => {
       from_status: null,
       to_status: 'RECEIVED',
       changed_by_role: 'CUSTOMER',
-      note: 'Pedido realizado mediante QR de mesa',
+      note: 'Pedido realizado mediante QR de mesa verificado',
       created_at: new Date().toISOString(),
     });
 
@@ -237,8 +277,8 @@ orderApp.post('/orders', async (req: Request, res: Response) => {
       aggregateType: 'Order',
       aggregateId: orderId,
       eventType: 'OrderCreated',
-      tenantId,
-      branchId,
+      tenantId: verifiedTenantId,
+      branchId: verifiedBranchId,
       correlationId,
       payload: {
         orderId,
@@ -261,8 +301,8 @@ orderApp.post('/orders', async (req: Request, res: Response) => {
       status: 'RECEIVED',
     }, {
       correlationId,
-      tenantId,
-      branchId,
+      tenantId: verifiedTenantId,
+      branchId: verifiedBranchId,
       deduplicationId: outboxRecord.id,
     }).catch(() => {});
 

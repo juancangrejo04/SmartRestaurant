@@ -1,7 +1,9 @@
-// Supabase Auth Integration & RBAC Security Middleware
+// Supabase Auth Integration & Strict RBAC Security Middleware
 import { Request, Response, NextFunction } from 'express';
 import { UserRole } from '../../src/types';
 import { getDb } from './db';
+
+export const VALID_ROLES: UserRole[] = ['OWNER', 'ADMIN', 'WAITER', 'KITCHEN', 'CUSTOMER'];
 
 export interface UserTokenPayload {
   id: string;
@@ -18,10 +20,16 @@ export interface AuthenticatedRequest extends Request {
 
 /**
  * Middleware: Enforces verified Supabase Auth session via Bearer Token.
- * Queries Supabase Auth directly via db.auth.getUser(token) and retrieves the
- * verified profile from the `users` table.
- *
- * CRITICAL SECURITY: Never trusts client-sent identity headers (e.g. x-user-role or x-user-id).
+ * 
+ * Strict Security Rules:
+ * 1. Validates the token using Supabase Auth (db.auth.getUser).
+ * 2. Queries the business profile in the 'users' table using authUser.id.
+ * 3. If no profile exists -> 403 Forbidden.
+ * 4. If tenant_id is null or empty -> 403 Forbidden.
+ * 5. If role is not a recognized role -> 403 Forbidden.
+ * 6. Never uses user_metadata as an authorization source.
+ * 7. Never assigns default tenants or default roles.
+ * 8. Rejects client-supplied headers (e.g. x-user-role, x-user-id).
  */
 export async function authenticateJWT(
   req: AuthenticatedRequest,
@@ -60,26 +68,56 @@ export async function authenticateJWT(
 
     const authUser = authData.user;
 
-    // 2. Fetch associated business profile from users table
-    const { data: profile } = await db
+    // 2. Fetch associated business profile from protected 'users' table in PostgreSQL
+    const { data: profile, error: profileError } = await db
       .from('users')
       .select('id, tenant_id, name, email, role, assigned_branch_id')
       .eq('id', authUser.id)
       .maybeSingle();
 
-    const role = (profile?.role || authUser.user_metadata?.role || 'CUSTOMER') as UserRole;
-    const tenantId = (profile?.tenant_id || authUser.user_metadata?.tenantId || 'rest-col-01') as string;
-    const name = profile?.name || authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'Usuario';
-    const assignedBranchId = profile?.assigned_branch_id || authUser.user_metadata?.assignedBranchId;
+    if (profileError) {
+      res.status(500).json({
+        success: false,
+        error: { code: 'DATABASE_ERROR', message: `Failed to query user profile: ${profileError.message}` },
+      });
+      return;
+    }
 
-    // 3. Attach authenticated, tamper-proof identity to request
+    // 3. Reject if no profile exists (Rule 3)
+    if (!profile) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'PROFILE_NOT_FOUND', message: 'No application business profile found for this authenticated user.' },
+      });
+      return;
+    }
+
+    // 4. Reject if tenant_id is null, empty, or whitespace (Rule 4)
+    if (!profile.tenant_id || typeof profile.tenant_id !== 'string' || profile.tenant_id.trim() === '') {
+      res.status(403).json({
+        success: false,
+        error: { code: 'INVALID_TENANT', message: 'Authenticated user profile does not have a valid tenant assigned.' },
+      });
+      return;
+    }
+
+    // 5. Reject if role is invalid or not recognized (Rule 5)
+    if (!profile.role || !VALID_ROLES.includes(profile.role as UserRole)) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'INVALID_ROLE', message: `User profile role '${profile.role}' is invalid or unauthorized.` },
+      });
+      return;
+    }
+
+    // 6. Attach strictly verified, tamper-proof identity to request (No user_metadata, no client headers)
     req.user = {
       id: authUser.id,
-      tenantId,
-      email: authUser.email || '',
-      role,
-      name,
-      assignedBranchId,
+      tenantId: profile.tenant_id.trim(),
+      email: profile.email || authUser.email || '',
+      role: profile.role as UserRole,
+      name: profile.name || 'Usuario',
+      assignedBranchId: profile.assigned_branch_id || undefined,
     };
 
     next();
